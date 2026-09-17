@@ -6,13 +6,15 @@
 
 ## Current State
 
-- **Status:** IN_PROGRESS (Milestone 5)
-- **Current Milestone:** 5 — Verifier
-- **Current Task:** T5.2 DONE — tiếp T5.3 (boundary test cho kiem_tra + Integration/DoD, chốt M5)
-- **Last Completed Task:** T5.2 — Wire Verifier vào ToolRouter (9 tests, 382 pass)
-- **Blocked By:** Không
-- **Next Action:** Triển khai T5.3.
-- **Last Updated:** 2026-09-17 (T5.2 complete)
+- **Status:** DONE (Milestone 5) — chờ lệnh milestone tiếp theo (M6 Browser theo TASKS.md)
+- **Current Milestone:** 5 — Verifier (hoàn thành)
+- **Current Task:** T5.3 DONE — Milestone 5 chốt. KHÔNG tự chuyển sang M6.
+- **Last Completed Task:** T5.3 — Boundary & Integration/DoD (5 tests, 387 pass, Milestone 5 DONE)
+- **Blocked By:** Không (chờ lệnh user cho M6, và cần transfer 3 commit M5 lên GitHub qua
+  bundle-transfer workflow khi có lệnh + PAT)
+- **Next Action:** Chờ lệnh user. Nếu được lệnh: transfer M5 lên GitHub trước, hoặc bắt đầu M6
+  (Browser) theo AGENTS.md quy trình (research spec → viết Milestone 6 Plan → task-by-task).
+- **Last Updated:** 2026-09-17 (T5.3 complete, Milestone 5 DONE)
 
 ## Milestone 5 Plan — Verifier (ARCHITECTURE.md layer 8 "Verifier", TASKS.md #5)
 
@@ -68,9 +70,9 @@
 - **T5.1 — Verifier core:** `ExecutionOutcomeVerifier`, thuần policy, test độc lập.
 - **T5.2 — Wire vào ToolRouter:** optional `verifier` param + optional `expectation` param cho
   `dispatch()`, 3 verdict map đúng, không phá test M3/M4 cũ, tổng quát hoá boundary test.
-- **T5.3 — Boundary & Integration/DoD:** boundary test cho `kiem_tra/verifier.py` (stdlib/
-  chaos-only, không đụng persistence/event_bus, không secret literal) + full verify + state +
-  report.
+- **T5.3 — Boundary & Integration/DoD (DONE):** boundary test cho `kiem_tra/verifier.py` (stdlib/
+  chaos-only, không đụng persistence/event_bus, không secret literal, chiều phụ thuộc đúng cả 2
+  hướng với ToolRouter) + full verify + state + report. Milestone 5 hoàn thành.
 - **Out of M5:** checker theo tool cụ thể (file tồn tại, HTTP 200, v.v. — chờ M6/M7); retry/
   replan/escalate thật khi gặp UNCERTAIN (Agent Loop M15 — milestone này chỉ báo cáo trung thực,
   không tự ý retry); bảng `verifications` riêng (không có trong DATA_MODEL.md, dùng chung
@@ -394,6 +396,7 @@
   tests) + `tests/test_tool_router_boundaries.py` (sửa: tổng quát hoá cho phép import cả
   `bao_mat.contracts.permission_engine` lẫn `kiem_tra.contracts.verifier`, vẫn cấm concrete
   engine/verifier). Không sửa `kiem_tra/verifier.py`; `pyproject.toml`/`uv.lock` untouched.
+- T5.3: `tests/test_kiem_tra_boundaries.py` (mới, 5 tests). Không sửa src nào. Milestone 5 DONE.
 
 ## Tests
 
@@ -510,6 +513,12 @@
   không sửa gì vẫn xanh; 4 test boundary (đã tổng quát hoá) xanh lại; `uvx ruff check .` → pass;
   `uvx ruff format --check .` → 1 file tự format lại, 111 files pass; `uv run chaos` env sạch →
   exit 0.
+- T5.3: `uv run pytest -q` → **387 passed** (382 cũ xanh + 5 mới: imports stdlib/chaos-only cho
+  `verifier.py`, không cong_cu.router/ORM/SDK/shell literal, không secret-shaped literal,
+  `verifier.py` độc lập persistence/event_bus, chỉ phụ thuộc `cong_cu.contracts.tool` (contract)
+  chứ không bao giờ `cong_cu.router`/`ToolRouter` — không phá chiều phụ thuộc); `uvx ruff check .`
+  → pass ngay lần đầu; `uvx ruff format --check .` → 112 files pass; `uv run chaos` env sạch →
+  exit 0. **Milestone 5 (Verifier) DONE.**
 
 ## Verification
 
@@ -597,6 +606,12 @@
   (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match; toàn bộ
   test T3.1/T3.2/T4.3 cũ (27 test) chạy lại không sửa gì vẫn pass — xác nhận không phá behavior
   cũ khi không có verifier; `.env` không tồn tại.
+- T5.3: diff review → 1 file test mới (`test_kiem_tra_boundaries.py`), không sửa src nào
+  (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match thật (chỉ
+  match chính pattern string của test); `.env` không tồn tại. DoD Milestone 5 (5/5 checklist —
+  xem TASKS.md §5) có evidence đầy đủ: contract T0.2 (đã khoá từ trước) + policy T5.1 + wire
+  T5.2 + boundary T5.3, không có bảng `verifications` mới (đúng scope quyết định ban đầu), không
+  wire vào `ApplicationContext` thật (chưa có tool registry, để dành như M3/M4).
 
 ## Important Technical Decisions
 
@@ -764,6 +779,17 @@
   quát hoá `test_tool_router_boundaries.py` từ chỗ chỉ biết `bao_mat` (T4.3) thành dict
   `{subsystem: allowed_contract}` — cùng logic áp dụng cho `bao_mat` (M4) và `kiem_tra` (M5),
   tránh lặp code khi thêm engine tiếp theo (không có gì ngăn) mà không sửa lại từ đầu.
+- T5.3: boundary test riêng cho `kiem_tra/verifier.py` xác nhận chiều phụ thuộc đúng — module
+  này chỉ được phép import `cong_cu.contracts.tool.ToolResult` (contract, để đọc outcome của
+  tool) chứ KHÔNG BAO GIỜ `cong_cu.router`/`ToolRouter` (implementation) — đối xứng với hướng
+  ngược lại mà `test_tool_router_boundaries.py` đã kiểm từ T3.3 (router chỉ được import
+  `kiem_tra.contracts.verifier`, không bao giờ `kiem_tra.verifier.ExecutionOutcomeVerifier`);
+  không cấm chuỗi `Verifier`/`kiem_tra` (module này CHÍNH LÀ kiem_tra, giống ngoại lệ đã áp dụng
+  cho `test_bao_mat_boundaries.py` ở T4.4); Milestone 5 (Verifier) hoàn thành: `Verifier` có
+  implementation thật (`ExecutionOutcomeVerifier`), đã wire vào `ToolRouter` với 3 verdict đúng
+  nghĩa (VERIFIED im lặng, FAILED/UNCERTAIN ngắn mạch với event riêng), audit trail đi qua
+  `EventBus`/`audit_events` có sẵn (không tạo bảng mới), không phá bất kỳ hành vi M3/M4 nào khi
+  không gắn verifier.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -806,6 +832,14 @@
   (Desktop UI M9) lẫn cơ chế re-dispatch sau khi duyệt (Agent Loop M15). `RecordingPermissionEngine`
   + `StaticPermissionEngine`/`ToolRouter` chưa wire vào `ApplicationContext` (cùng lý do M3: chưa
   có tool registry thật để cần composition).
+- **M5 — `Verifier` thật đã có (`ExecutionOutcomeVerifier`) nhưng vẫn baseline conservative**: chỉ
+  biết `expectation.conditions` rỗng hay không, không có checker theo tool cụ thể (file tồn tại,
+  HTTP 200, v.v.) — cố tình chờ M6 browser/M7 OS khi có tool thật để biết cần check gì.
+  `UNCERTAIN` được báo cáo trung thực (event `tool.verification.uncertain` + `ok=False`) nhưng
+  KHÔNG có retry/replan/escalate thật — cần Agent Loop (M15) để đóng vòng lặp mà contract's
+  docstring yêu cầu. Không có bảng `verifications` riêng (không nằm trong DATA_MODEL.md) — audit
+  trail dùng chung `EventBus`/`audit_events` đã có. `ExecutionOutcomeVerifier`/`ToolRouter` chưa
+  wire vào `ApplicationContext` (cùng lý do M3/M4: chưa có tool registry thật).
 - Repo public trên GitHub (`https://github.com/thanh577/CHAOS-_AGENTS`), branch `main` — đã
   push đến hết Milestone 4 (`76ebc9e`), bao gồm M4 (`e574476`/`ceb619c`/`b8fe652`/`76ebc9e`).
   Lưu ý: cloud container bị chặn push trực tiếp lên repo này (org egress-proxy policy) — quy
@@ -1159,11 +1193,47 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - AC T5.2: đúng scope, không phá bất kỳ test M3/M4 nào, router chỉ biết abstraction không
     hardcode implementation, verifier không được gọi ngoài trường hợp cần thiết.
 
+- **T5.3 — Boundary & Integration/DoD (2026-09-17, chốt M5, sau commit 12c9f13):**
+  - `tests/test_kiem_tra_boundaries.py` (mới, mirror `test_bao_mat_boundaries.py` T4.4):
+    imports stdlib/chaos-only; không `cong_cu.router`/`ToolRouter`/ORM/SDK/shell literal; không
+    secret-shaped literal; `verifier.py` độc lập persistence/event_bus (không có "recording"
+    counterpart trong M5 vì không có bảng `verifications` để ghi); AST-check riêng xác nhận
+    `verifier.py` chỉ được import `cong_cu.contracts.tool.ToolResult` (contract) chứ không bao
+    giờ `cong_cu.router` (implementation) — đối xứng đúng chiều với check đã có ở
+    `test_tool_router_boundaries.py` (router chỉ import `kiem_tra.contracts.verifier`).
+  - Không cấm chuỗi `Verifier`/`kiem_tra` (module này CHÍNH LÀ kiem_tra — cùng ngoại lệ đã áp
+    dụng cho `test_bao_mat_boundaries.py` ở T4.4).
+  - 5 tests mới (tổng 387 pass); không sửa src nào ở T5.3.
+  - ruff + format pass ngay lần đầu; chaos exit 0. Dependency delta 0. Secret scan sạch (chỉ
+    match chính pattern string của test).
+  - AC T5.3: đúng scope, boundary test đối xứng với router, không tạo bảng `verifications` mới
+    (giữ đúng quyết định ban đầu), không wire `ToolRouter`+`Verifier` vào `ApplicationContext`
+    (chưa có tool registry thật — để dành như M3/M4).
+  - **Milestone 5 (Verifier) DONE.** DoD 5/5 có evidence: contract T0.2 (khoá sẵn) + policy T5.1
+    (`ExecutionOutcomeVerifier`) + wire T5.2 (`ToolRouter` + `expectation` per-call) + boundary
+    T5.3 (dependency direction đúng cả 2 chiều). Cần push 3 commit M5 (T5.1 `74db85f`, T5.2
+    `12c9f13`, T5.3 — commit sắp tới) lên GitHub qua bundle-transfer workflow khi có lệnh + PAT.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T5.3 (chốt M5)
+- Session: Milestone 5 — T5.3 Boundary & Integration/DoD
+- Completed: T5.3 (`test_kiem_tra_boundaries.py`: stdlib/chaos-only, không cong_cu.router/
+  ToolRouter/ORM/SDK/shell, không secret literal, verifier.py độc lập persistence/event_bus,
+  chỉ phụ thuộc cong_cu.contracts.tool (contract) không bao giờ cong_cu.router; 5 tests, 387
+  pass, ruff/format pass, chaos exit 0, dep delta 0). Milestone 5 (Verifier) DONE.
+- Changed: 1 test file mới (xem Changed Files); không sửa src nào ở T5.3
+- Tests: pytest 387 passed (382 cũ xanh + 5 mới); pass ngay lần đầu
+- Decisions: không cấm `Verifier`/`kiem_tra` trong boundary test này (khác mẫu M1/M2, giống M4)
+  vì module này chính là kiem_tra; cấm `cong_cu.router`/`ToolRouter` để giữ đúng chiều phụ thuộc
+  (đối xứng với check đã có ở test_tool_router_boundaries.py)
+- Blockers: không — DoD Milestone 5 có evidence đầy đủ
+- Next: chờ lệnh milestone tiếp theo (M6 Browser theo TASKS.md); KHÔNG tự sang M6. Cần push 3
+  commit M5 (T5.1/T5.2/T5.3) lên GitHub qua bundle-transfer workflow khi có lệnh + PAT.
 
 ## 2026-09-17 T5.2
 - Session: Milestone 5 — T5.2 Wire Verifier vào ToolRouter
