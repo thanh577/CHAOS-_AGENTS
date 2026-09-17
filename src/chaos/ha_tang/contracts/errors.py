@@ -33,6 +33,11 @@ class ChaosError(Exception):
         self.message = message
         self.details: dict[str, Any] = dict(details) if details else {}
 
+    def to_dict(self) -> dict[str, Any]:
+        """Stable machine-readable shape. Callers must redact ``details``
+        (see ``chaos.ha_tang.redaction``) before logging or transport."""
+        return {"code": self.code.value, "message": self.message, "details": dict(self.details)}
+
 
 class ValidationError(ChaosError):
     """Structured input/schema validation failed."""

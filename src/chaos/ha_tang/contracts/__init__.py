@@ -12,9 +12,10 @@ from chaos.ha_tang.contracts.errors import (
     ValidationError,
     VerificationError,
 )
-from chaos.ha_tang.contracts.events import Event
+from chaos.ha_tang.contracts.events import EVENT_NAME_RE, Event, is_conventional_name
 
 __all__ = [
+    "EVENT_NAME_RE",
     "ChaosError",
     "ConfigurationError",
     "ErrorCode",
@@ -27,4 +28,5 @@ __all__ = [
     "ToolCall",
     "ValidationError",
     "VerificationError",
+    "is_conventional_name",
 ]

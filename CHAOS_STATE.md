@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.3 DONE — T0.4 chưa được giao (waiting for command)
-- **Last Completed Task:** T0.3 — Configuration & Application Bootstrap
+- **Current Task:** T0.4 DONE — T0.5 chưa được giao (waiting for command)
+- **Last Completed Task:** T0.4 — Logging, Error Model & Observability Foundation
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh T0.4. Không tự chuyển milestone.
-- **Last Updated:** 2026-09-17 (T0.3 complete)
+- **Next Action:** Chờ lệnh T0.5. Không tự chuyển milestone.
+- **Last Updated:** 2026-09-17 (T0.4 complete)
 
 ## Completed Tasks
 
@@ -56,6 +56,22 @@
     no network/shell/fs/dotenv, no secret literals. 0 dependency mới.
   - AC T0.3: 26/26 đạt (xem T0.3 report). Không AI/executor/DB/GUI/voice/avatar, không vượt scope M0.
 
+- **T0.4 — Logging, Error Model & Observability Foundation (2026-09-17):**
+  - Review code T0.2/T0.3 trước khi làm: khớp report, không mâu thuẫn spec — error model đã đủ
+    7 categories nên chỉ thêm additive `ChaosError.to_dict()` (không rename, không phá contract).
+  - Mới `ha_tang/redaction.py` (stdlib, zero-chaos-import để kernel dùng không cycle):
+    `redact`/`redact_mapping`/`redact_text` (keys + Bearer/Basic + key=value, recurse dict/list/tuple,
+    Secret nhận diện duck-typing), `format_error` (`[code] message` đã redact),
+    `error_details` (bản sao details đã redact).
+  - Mới `ha_tang/context.py`: `TraceContext` frozen (correlation/session/task/tool_run ids) +
+    `use_context`/`get_context`/`clear_context` trên `contextvars` (async-safe, nesting, missing→None).
+  - `ha_tang/logging.py` mở rộng tương thích ngược: `LOG_FORMAT`/`STRUCTURED_FIELDS` constants,
+    `resolve_level` (tên/số, sai → `ConfigurationError`), `log_event` (redact payload + gắn ids
+    từ context hiện tại, message shape cố định). `Event` thêm `safe_payload()` +
+    `EVENT_NAME_RE`/`is_conventional_name` (convention `tool.execution.started`, không bus implementation).
+  - 37 tests mới (tổng 117 pass); ruff + format pass; `uv run chaos` exit 0. 0 dependency mới.
+  - AC T0.4: 20/20 đạt (xem T0.4 report). Không subsystem cấm, không vượt scope M0.
+
 ## Changed Files
 
 - T0.1 (commit 98fd45c, 41 files): `.gitignore`, `.env.example`, `.python-version`, `pyproject.toml`, `uv.lock`,
@@ -69,6 +85,9 @@
 - T0.3: `src/chaos/cau_hinh/{secrets,settings}.py` (mới) + `__init__.py` (re-export),
   `src/chaos/ha_tang/{runtime,logging,application}.py` (mới), `src/chaos/main.py` (bootstrap),
   `.env.example` (tên biến khớp loader), 3 test files (`test_config/bootstrap/bootstrap_boundaries`).
+- T0.4: `src/chaos/ha_tang/{redaction,context}.py` (mới), `logging.py` (structured helpers),
+  `contracts/{errors.py: +to_dict, events.py: +safe_payload/naming, __init__.py: re-export}`,
+  6 test files (`test_error_model/redaction/trace_context/structured_logging/events_foundation/observability_boundaries`).
 
 ## Tests
 
@@ -87,6 +106,14 @@
   no network/shell/fs/dotenv + no secret literals).
 - Lint/format T0.3: `uvx ruff check` → pass (1 lỗi auto-fix: `__all__` sort);
   `uvx ruff format --check` → 44 files pass.
+- T0.4: `uv run pytest -q` → **117 passed** (80 cũ + 37 mới: error codes/model/safe-format;
+  redaction keys/bearer/nesting/holders; context set/nested/async-isolation; logging levels/events;
+  event envelope/naming/safe-payload; boundaries stdlib-only + no forbidden subsystems).
+- Lint/format T0.4: `uvx ruff check .` → pass (3 lỗi: 2 auto-fix `__all__` sort + `datetime.UTC`,
+  1 sửa tay B017 blind-Exception → `FrozenInstanceError`); `uvx ruff format --check .` → pass
+  (1 file reformat `__all__` multi-line); `uv run chaos` → exit 0.
+- Trong lúc test phát hiện và sửa 3 kỳ vọng sai phía test (không phải lỗi implementation):
+  bare string không key-context không thể phân loại; `LogRecord.args` unwrap dict đơn.
 
 ## Verification
 
@@ -99,6 +126,9 @@
 - T0.3: diff review → 3 files sửa (`main.py` bootstrap, `cau_hinh/__init__.py` re-export,
   `.env.example` tên biến) + 8 files mới; `pyproject.toml`/`uv.lock` untouched → 0 dep mới;
   secret scan → 0 match; forbidden-dep scan (pydantic/dotenv/SDK/…) → 0 match; `.env` không tồn tại.
+- T0.4: diff review → 4 files sửa (additive, không phá T0.1–T0.3) + 8 files mới;
+  `pyproject.toml`/`uv.lock` untouched → 0 dep mới; secret scan → 0 match;
+  forbidden-subsystem scan (sdk/db/ui/network/…) → 0 match; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -125,6 +155,11 @@
 - T0.3: blank env var = unset (fallback default) cho mọi biến; production-gate yêu cầu AI credentials.
 - T0.3: `main()` không parse CLI args (không Typer theo policy); testability qua explicit mapping + monkeypatch env.
 - T0.3: `configure_logging` first-call-wins (deterministic); chỉ `safe_summary` (booleans, không values) được log.
+- T0.4: redaction zero-chaos-import (tránh cycle contracts↔cau_hinh); Secret nhận diện duck-typing qua `expose`.
+- T0.4: `Event` giữ nguyên fields (correlation_id + payload đã đủ theo spec §7) — chỉ thêm helper,
+  không đổi contract; lazy import redaction trong `safe_payload` để kernel import nhẹ.
+- T0.4: `log_event` nhận `str|int` level và validate qua `resolve_level`; `logger.log(n, "%s", fields)`
+  (lưu ý stdlib unwrap dict-arg đơn vào `record.args` — test đọc đúng chỗ).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -159,6 +194,9 @@
 
 ## Spec References Used
 
+- T0.4: `AGENTS.md`, `README.md`, `docs/README.md`, `docs/spec/ARCHITECTURE.md`, `docs/spec/CONTRACTS.md`,
+  `docs/spec/SECURITY.md`, `docs/spec/TESTING.md`, `docs/spec/DEFINITION_OF_DONE.md`, `docs/spec/AGENT_RULES.md`
+  (+ nền T0.1–T0.3 giữ nguyên).
 - T0.3: `AGENTS.md`, `docs/spec/REPOSITORY.md`, `docs/spec/ARCHITECTURE.md`, `docs/spec/SECURITY.md`
   (+ nền T0.1/T0.2 giữ nguyên).
 - T0.2: `AGENTS.md`, `docs/spec/CONTRACTS.md`, `docs/spec/ARCHITECTURE.md`, `docs/spec/REPOSITORY.md`
@@ -175,12 +213,24 @@ git + foundation + 3 tests pass + baseline commit 98fd45c. Không drift kiến t
 ruff/format pass, 0 dep mới. AC 17/17. Dừng ở M0, chờ lệnh T0.3.
 2026-09-17 — T0.3 hoàn tất: config layer + bootstrap + runtime skeleton + logging, 80 tests pass,
 ruff/format pass, 0 dep mới. AC 26/26. Dừng ở M0, chờ lệnh T0.4.
+2026-09-17 — T0.4 hoàn tất: redaction + trace context + structured logging + event helpers,
+error model chỉ thêm additive `to_dict`, 117 tests pass, ruff/format pass, 0 dep mới.
+AC 20/20. Dừng ở M0, chờ lệnh T0.5.
 
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.4
+- Session: Milestone 0 — T0.4 Logging, Error Model & Observability Foundation
+- Completed: T0.4 (redaction, TraceContext, log_event/resolve_level, Event safe_payload+naming, to_dict; 6 test files, 117 tests pass, ruff/format pass, chaos exit 0)
+- Changed: 4 sửa (additive) + 8 mới (xem Changed Files); pyproject/uv.lock không đổi
+- Tests: pytest 117 passed (80 cũ giữ xanh); 3 kỳ vọng sai phía test đã sửa, implementation không lỗi
+- Decisions: redaction zero-import + duck-typing Secret, Event không thêm field, log_event str|int level, đọc record.args đúng semantics stdlib
+- Blockers: không
+- Next: chờ lệnh T0.5; không tự chuyển task/milestone
 
 ## 2026-09-17 T0.3
 - Session: Milestone 0 — T0.3 Configuration & Application Bootstrap
