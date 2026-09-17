@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.4 DONE — T0.5 chưa được giao (waiting for command)
-- **Last Completed Task:** T0.4 — Logging, Error Model & Observability Foundation
+- **Current Task:** T0.5 DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
+- **Last Completed Task:** T0.5 — Application Runtime Orchestration Foundation
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh T0.5. Không tự chuyển milestone.
-- **Last Updated:** 2026-09-17 (T0.4 complete)
+- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone.
+- **Last Updated:** 2026-09-17 (T0.5 complete)
 
 ## Completed Tasks
 
@@ -72,6 +72,20 @@
   - 37 tests mới (tổng 117 pass); ruff + format pass; `uv run chaos` exit 0. 0 dependency mới.
   - AC T0.4: 20/20 đạt (xem T0.4 report). Không subsystem cấm, không vượt scope M0.
 
+- **T0.5 — Application Runtime Orchestration Foundation (2026-09-17):**
+  - LƯU Ý LỆNH: order T0.5 bị cắt ngang giữa mục 6 + không nhận được trả lời làm rõ —
+    chỉ triển khai các mục 1–5 đã nhận đầy đủ + quy trình chuẩn T0.1–T0.4; phần suy luận ghi rõ ở đây.
+  - `ha_tang/runtime.py`: `Service` ABC (name + startup/shutdown no-op) làm empty hook;
+    `Runtime(services=())` tương thích ngược; hooks chạy TRƯỚC khi ghi transition
+    (startup fail → vẫn CREATED, teardown fail → vẫn RUNNING, exception gốc propagate).
+    `stop()` idempotent từ STOPPED; `shutdown()` từ INITIALIZED (không giả RUNNING) /
+    RUNNING / STOPPED (no-op); cấm restart từ STOPPED; không thêm state FAILED.
+  - `ha_tang/application.py`: `ApplicationContext` frozen + thêm field `logger`
+    (settings/runtime/logger — không god object); `Application.run()` log lỗi an toàn
+    (`format_error`) rồi re-raise giữ classification; thêm `Application.shutdown()` public.
+  - 19 tests mới (tổng 136 pass); ruff + format pass; `uv run chaos` exit 0. 0 dependency mới.
+  - Không AI/executor/DB/GUI/voice/avatar, không execution loop, không vượt scope M0.
+
 ## Changed Files
 
 - T0.1 (commit 98fd45c, 41 files): `.gitignore`, `.env.example`, `.python-version`, `pyproject.toml`, `uv.lock`,
@@ -88,6 +102,8 @@
 - T0.4: `src/chaos/ha_tang/{redaction,context}.py` (mới), `logging.py` (structured helpers),
   `contracts/{errors.py: +to_dict, events.py: +safe_payload/naming, __init__.py: re-export}`,
   6 test files (`test_error_model/redaction/trace_context/structured_logging/events_foundation/observability_boundaries`).
+- T0.5: `src/chaos/ha_tang/{runtime,application}.py` (sửa: Service hooks, shutdown, frozen context,
+  failure classification) + `tests/test_runtime_orchestrator.py` (mới, 19 tests).
 
 ## Tests
 
@@ -114,6 +130,10 @@
   (1 file reformat `__all__` multi-line); `uv run chaos` → exit 0.
 - Trong lúc test phát hiện và sửa 3 kỳ vọng sai phía test (không phải lỗi implementation):
   bare string không key-context không thể phân loại; `LogRecord.args` unwrap dict đơn.
+- T0.5: `uv run pytest -q` → **136 passed** (117 cũ giữ xanh + 19 mới: hook order/failure,
+  shutdown paths, idempotency, no-restart, invalid transitions, frozen context, run failure classification).
+- Lint/format T0.5: `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format --check .` → 74 files pass;
+  `uv run chaos` → exit 0 (không đổi behavior entrypoint).
 
 ## Verification
 
@@ -129,6 +149,9 @@
 - T0.4: diff review → 4 files sửa (additive, không phá T0.1–T0.3) + 8 files mới;
   `pyproject.toml`/`uv.lock` untouched → 0 dep mới; secret scan → 0 match;
   forbidden-subsystem scan (sdk/db/ui/network/…) → 0 match; `.env` không tồn tại.
+- T0.5: diff review → 2 files sửa + 1 test mới (không phá T0.1–T0.4: `Runtime()` không args
+  và `run()` history giữ nguyên shape); `pyproject.toml`/`uv.lock` untouched → 0 dep mới;
+  secret scan → 0 match; forbidden-dep scan → 0 match; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -160,6 +183,9 @@
   không đổi contract; lazy import redaction trong `safe_payload` để kernel import nhẹ.
 - T0.4: `log_event` nhận `str|int` level và validate qua `resolve_level`; `logger.log(n, "%s", fields)`
   (lưu ý stdlib unwrap dict-arg đơn vào `record.args` — test đọc đúng chỗ).
+- T0.5: hooks-before-record (fail không để lại state mơ hồ); `Service` zero-default, sync,
+  stdlib-only; context frozen nhưng `Runtime` mutable có chủ đích (state machine);
+  suy luận phần lệnh thiếu: failure → safe-log + re-raise (không nuốt lỗi, đúng AGENTS.md).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -216,12 +242,24 @@ ruff/format pass, 0 dep mới. AC 26/26. Dừng ở M0, chờ lệnh T0.4.
 2026-09-17 — T0.4 hoàn tất: redaction + trace context + structured logging + event helpers,
 error model chỉ thêm additive `to_dict`, 117 tests pass, ruff/format pass, 0 dep mới.
 AC 20/20. Dừng ở M0, chờ lệnh T0.5.
+2026-09-17 — T0.5 hoàn tất (lệnh bị cắt ngang, làm theo mục 1–5 + quy trình chuẩn):
+Service hooks + shutdown/idempotency/no-restart + frozen context + failure classification,
+136 tests pass, ruff/format pass, 0 dep mới. Milestone 0 xong phần orchestration.
 
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.5
+- Session: Milestone 0 — T0.5 Application Runtime Orchestration Foundation
+- Completed: T0.5 (Service ABC + hooks-before-record, shutdown/idempotent-stop/no-restart, frozen context + logger, run failure classification; 19 tests, 136 pass, ruff/format pass, chaos exit 0)
+- Changed: 2 sửa + 1 test mới (xem Changed Files); pyproject/uv.lock không đổi
+- Tests: pytest 136 passed (117 cũ giữ xanh, history shape run() không đổi)
+- Decisions: hooks-before-record, shutdown từ INITIALIZED bỏ qua RUNNING, stop/shutdown idempotent từ STOPPED, context frozen + Runtime mutable có chủ đích
+- Blockers: lệnh T0.5 bị cắt ngang mục 6 và không có trả lời làm rõ — đã scope-lock theo mục 1–5, cần user xác nhận khi review
+- Next: chờ lệnh milestone tiếp theo; không tự chuyển milestone
 
 ## 2026-09-17 T0.4
 - Session: Milestone 0 — T0.4 Logging, Error Model & Observability Foundation
