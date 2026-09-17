@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.1 DONE — T0.2 chưa được giao (waiting for command)
-- **Last Completed Task:** T0.1 — Repository & Git Foundation (commit 98fd45c)
+- **Current Task:** T0.2 DONE — T0.3 chưa được giao (waiting for command)
+- **Last Completed Task:** T0.2 — Core Foundation Contracts
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh T0.2. Không tự chuyển milestone.
-- **Last Updated:** 2026-09-17 (T0.1 complete)
+- **Next Action:** Chờ lệnh T0.3. Không tự chuyển milestone.
+- **Last Updated:** 2026-09-17 (T0.2 complete)
 
 ## Completed Tasks
 
@@ -25,17 +25,43 @@
   - AC: git repo ✓, ignore/secrets ✓, python pinned ✓, uv toolchain ✓, package importable ✓, baseline tests ✓, commit ✓, no out-of-scope deps ✓.
   - Ghi nhận: `TASKS.md` chưa định nghĩa T0.x chi tiết — AC của T0.1 do agent lập từ Foundation requirements (đã báo trong T0.1 report).
 
+- **T0.2 — Core Foundation Contracts (2026-09-17):**
+  - 7 contracts theo `CONTRACTS.md`: `AIProvider` (+Role/AIRequest/AIResponse/AIStreamChunk/ToolSpec),
+    `Tool` (+ToolResult), `MemoryStore` (+MemoryRecord/MemoryQuery), `PermissionEngine`
+    (+PermissionRequest/PermissionDecision/PermissionVerdict), `Verifier`
+    (+VerificationExpectation/VerificationResult/VerificationVerdict),
+    `STTProvider`, `TTSProvider` (+AudioFormat/TranscriptChunk/Transcription/SpeechRequest/SpeechChunk).
+  - Shared kernel `ha_tang/contracts/`: `ErrorCode` + `ChaosError` hierarchy (7 loại),
+    `PermissionClass` (SAFE/CONFIRM/BLOCK), `ToolCall`, `Event`.
+  - Layout theo `REPOSITORY.md` (contracts/ trong từng subpackage hiện có); voice đặt trong
+    `bo_nao/contracts/` theo precedent AIProvider (reversible, xem report).
+  - Stdlib only (`dataclasses`, `abc`, `enum`, `collections.abc`, `uuid`, `datetime`) — 0 dependency mới.
+  - 47 tests contract mới (tổng 50 pass); ruff check + format pass; boundary tests chứng minh
+    stdlib-only, no network/shell/fs, Tool không chạm PermissionEngine, AI/voice không vendor-lock.
+  - AC T0.2: 17/17 đạt (xem T0.2 report). Không implementation thật, không vượt scope M0.
+
 ## Changed Files
 
 - T0.1 (commit 98fd45c, 41 files): `.gitignore`, `.env.example`, `.python-version`, `pyproject.toml`, `uv.lock`,
   `src/chaos/__init__.py`, `src/chaos/main.py`, 9× `src/chaos/<subpkg>/__init__.py`,
   `tests/test_foundation.py`, `.github/workflows/ci.yml`, `scripts/.gitkeep`, `installer/windows/.gitkeep`
   (+ toàn bộ spec/docs có sẵn được đưa vào root-commit baseline).
+- T0.2: 6× `src/chaos/*/contracts/__init__.py` + 10 contract modules
+  (`ha_tang`: errors/common/events; `bo_nao`: ai_provider/stt_provider/tts_provider;
+  `cong_cu`: tool; `tri_nho`: memory_store; `bao_mat`: permission_engine; `kiem_tra`: verifier)
+  + 8 test files (`test_contract_kernel/tool/ai_provider/memory/permission/verifier/voice/boundaries`).
 
 ## Tests
 
 - T0.1: `uv run pytest -q` → **3 passed** (`tests/test_foundation.py`: version, 9 subpackages importable, main returns 0).
-- Lint/format: `uvx ruff check` → pass; `uvx ruff format --check` → 12 files formatted.
+- T0.2: `uv run pytest -q` → **50 passed** (3 foundation + 47 contract mới).
+  Kernel (error codes/model, permission classes, ToolCall, Event) · Tool (shape, Result invariants,
+  async surface, AST no-bypass) · AIProvider (DTOs, fake complete/stream, vendor-lock scan) ·
+  Memory (CRUD double) · Permission (3 verdicts, CONFIRM prompt invariant) ·
+  Verifier (3 states round-trip) · Voice (STT/TTS + streaming doubles, SDK scan) ·
+  Boundaries (AST stdlib-only imports, regex no network/shell/fs).
+- Lint/format: `uvx ruff check` → pass (12 lỗi auto-fix ban đầu: `typing.Mapping`→`collections.abc`,
+  `__all__` sort, `datetime.UTC`, import sort); `uvx ruff format --check` → pass.
 - Import/entry: `uv run python -c "import chaos"` → 0.0.1; `uv run chaos` → banner + exit 0.
 
 ## Verification
@@ -43,6 +69,9 @@
 - T0.1: `git log` → root-commit 98fd45c trên `main`; `git status` sau commit → clean (ngoại trừ `CHAOS_STATE.md` update này, sẽ commit ở task tiếp theo hoặc khi có lệnh).
 - Secret scan (rg patterns trên `.env.example`, `pyproject.toml`, `src`, `tests`, `.github`, `scripts`): chỉ match placeholder comment và docstring — không có secret thật; không tồn tại `.env`.
 - Cấu trúc `find src tests scripts installer .github` khớp layout M0 yêu cầu.
+- T0.2: `git status` trước commit → chỉ file mới T0.2 (tracked files untouched, `pyproject.toml`/`uv.lock`
+  không đổi → 0 dependency mới); secret scan (key/token/private-key/password patterns trên
+  src/tests/pyproject/env-example) → 0 match; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -53,6 +82,17 @@
 - Subpackage `__init__.py` là docstring-only, ghi rõ milestone tương lai — không implementation giả.
 - Git author tạm `CHAOS Agent <chaos-agent@local>` cho baseline commit (chưa có user git config); user nên set `git config user.name/email` thật trước commit tiếp theo.
 - CI `.github/workflows/ci.yml`: setup-python từ `.python-version` + `uv sync --group dev` + `pytest -q`.
+- T0.2: shared kernel (`PermissionClass`, `ToolCall`, errors, `Event`) đặt trong `ha_tang/contracts/`
+  để tránh coupling `cong_cu`↔`bao_mat` và tránh package top-level mới ngoài `REPOSITORY.md` (reversible).
+- T0.2: voice contracts (`STT/TTSProvider`, `AudioFormat`) đặt trong `bo_nao/contracts/` theo precedent
+  AIProvider (external provider boundary của brain); `giao_dien` để dành cho UI M9 (reversible).
+- T0.2: `AudioFormat` định nghĩa trong `stt_provider.py`, `tts_provider.py` import lại (cùng package, không cycle).
+- T0.2: schema dùng `Mapping` hình JSON-schema (không pydantic, theo dependency policy).
+  Async surface test bằng `asyncio.run` + `inspect.iscoroutinefunction/isasyncgenfunction` (không pytest-asyncio).
+- T0.2: `ToolResult(ok=True)` cấm error / `(ok=False)` bắt buộc error; `PermissionDecision(CONFIRM)`
+  bắt buộc `confirmation_prompt` — ép bằng `__post_init__` + test.
+- T0.2: tên lỗi tránh shadow builtin — `PermissionDeniedError` (không `PermissionError`),
+  `OperationTimeoutError` (không `TimeoutError`).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -74,6 +114,8 @@
 - Git `user.name`/`user.email` chưa cấu hình thật (baseline commit dùng author tạm) — set trước commit tiếp theo.
 - `.venv/` tồn tại local (đúng git-ignored) — phiên sau chạy `uv sync --group dev` lại nếu thiếu.
 - Scope M1+ (AI provider, tool exec, browser, memory, voice, avatar, permission/verifier đầy đủ) cố tình chưa chạm — ghi nhận để không quên, không triển khai sớm.
+- T0.2 không phát hiện mâu thuẫn spec: `CONTRACTS.md`/`ARCHITECTURE.md` đủ rõ để định nghĩa shape;
+  các điểm thiếu (subtask breakdown, policy tables, bus semantics) thuộc milestone sau, đã ghi nhận không làm sớm.
 
 ## Do Not Repeat
 
@@ -85,6 +127,8 @@
 
 ## Spec References Used
 
+- T0.2: `AGENTS.md`, `docs/spec/CONTRACTS.md`, `docs/spec/ARCHITECTURE.md`, `docs/spec/REPOSITORY.md`
+  (+ nền T0.1 giữ nguyên).
 - T0.1: `AGENTS.md`, `docs/spec/TASKS.md`, `docs/spec/REPOSITORY.md`, `docs/spec/ARCHITECTURE.md`,
   `docs/spec/SECURITY.md`, `docs/spec/TESTING.md`, `docs/spec/DEFINITION_OF_DONE.md`,
   `docs/spec/AGENT_RULES.md`, `docs/agent/PROJECT_CHECKLIST.md`, `docs/agent/STARTUP_INSTRUCTIONS.md`, `README.md`.
@@ -93,12 +137,23 @@
 
 2026-09-17 — Startup baseline report (NOT_STARTED, M0) + triển khai T0.1 hoàn tất: repo sạch spec-only →
 git + foundation + 3 tests pass + baseline commit 98fd45c. Không drift kiến trúc, không secret, không vượt scope M0.
+2026-09-17 — T0.2 hoàn tất: 7 contracts + shared kernel (errors/events/common), stdlib-only, 50 tests pass,
+ruff/format pass, 0 dep mới. AC 17/17. Dừng ở M0, chờ lệnh T0.3.
 
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.2
+- Session: Milestone 0 — T0.2 Core Foundation Contracts
+- Completed: T0.2 (7 contracts + kernel errors/events/common, 8 test files, 50 tests pass, ruff/format pass)
+- Changed: 24 files mới (16 src contracts + 8 tests); pyproject/uv.lock không đổi
+- Tests: pytest 50 passed; boundary tests (stdlib-only, no side-effect, no-bypass, no vendor-lock)
+- Decisions: shared kernel ở ha_tang, voice ở bo_nao, AudioFormat trong stt_provider, Mapping thay pydantic, asyncio.run thay pytest-asyncio, invariant __post_init__, tên lỗi tránh shadow builtin
+- Blockers: không
+- Next: chờ lệnh T0.3; không tự chuyển task/milestone
 
 ## 2026-09-17 T0.1
 - Session: Milestone 0 — T0.1 Repository & Git Foundation
