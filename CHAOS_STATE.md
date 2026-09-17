@@ -6,13 +6,76 @@
 
 ## Current State
 
-- **Status:** DONE (Milestone 4) — chờ lệnh milestone tiếp theo
-- **Current Milestone:** 4 — Permission (HOÀN THÀNH)
-- **Current Task:** T4.4 DONE — Milestone 4 (Permission) hoàn thành. Không tự sang M5.
+- **Status:** IN_PROGRESS (Milestone 5) — user đã ra lệnh "tiếp tục M5"
+- **Current Milestone:** 5 — Verifier
+- **Current Task:** T5.1 (Verifier core: `ExecutionOutcomeVerifier`)
 - **Last Completed Task:** T4.4 — Boundary & Integration/DoD, chốt Milestone 4 (4 tests, 367 pass)
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh user cho Milestone 5 (Verifier) hoặc push M4 lên GitHub qua bundle.
-- **Last Updated:** 2026-09-17 (T4.4 complete — Milestone 4 DONE)
+- **Next Action:** Triển khai T5.1.
+- **Last Updated:** 2026-09-17 (bắt đầu M5)
+
+## Milestone 5 Plan — Verifier (ARCHITECTURE.md layer 8 "Verifier", TASKS.md #5)
+
+- **Scope:** `kiem_tra/contracts/verifier.py` (T0.2) đã khoá shape `Verifier` (ABC
+  `verify(result: ToolResult, expectation) -> VerificationResult`), `VerificationExpectation`
+  (`conditions`/`details`), `VerificationResult` (verdict VERIFIED/FAILED/UNCERTAIN + `checked`+
+  `evidence`+`reason`), `VerificationVerdict`. Khác với Permission (M4), DATA_MODEL.md KHÔNG có
+  bảng `verifications` nào được thiết kế sẵn — không có bảng mới nào được tạo ra ở milestone
+  này (tránh schema change không nằm trong spec); audit trail của verification đi qua đúng
+  cơ chế đã có: `ToolRouter` publish sự kiện qua `EventBus` (M2), tự động chảy vào
+  `audit_events` nếu `AuditEventSink` đã được gắn — không cần sink mới.
+- **Policy (T5.1, `kiem_tra/verifier.py`, `ExecutionOutcomeVerifier`):** baseline bảo thủ,
+  đúng tinh thần `StaticPermissionEngine` ở M4 — không bịa ra logic kiểm tra theo tool cụ thể
+  (chưa có tool nào tồn tại, tool đầu tiên là M6/M7):
+  - `expectation.conditions` rỗng (không khai báo postcondition cụ thể nào) → `VERIFIED`, tin
+    theo `result.ok` (vì hàm này chỉ được gọi khi `result.ok is True`, xem dưới).
+  - `expectation.conditions` không rỗng (có postcondition được khai báo tên) → `UNCERTAIN` —
+    engine này không có domain-knowledge để tự kiểm tra một postcondition cụ thể tên gì, và
+    theo đúng docstring của contract "UNCERTAIN — the runtime must then retry, replan or
+    escalate, never silently accept" nên KHÔNG được tự ý coi là VERIFIED chỉ vì không biết
+    cách check. Bộ checker theo tool cụ thể (vd "file-exists") để dành khi tool đó tồn tại.
+  - Không I/O, thuần logic trên object nhận được — giống `bao_mat/engine.py` không đụng
+    persistence/event bus.
+- **Wire vào ToolRouter (T5.2, sửa `cong_cu/router.py`):** thêm tham số optional
+  `verifier: Verifier | None = None` ở constructor (DI, đúng kiểu `permission_engine`) VÀ thêm
+  tham số optional `expectation: VerificationExpectation | None = None` ở `dispatch()` — khác
+  `permission_engine` (router-wide, cố định lúc khởi tạo), `expectation` là dữ liệu theo TỪNG
+  lời gọi (mỗi `ToolCall` có thể có postcondition khác nhau), không thể nhét vào constructor.
+  Cân nhắc đặt `expectation` vào `ToolCall` (kernel contract T0.2, dùng chung
+  `cong_cu`/`bao_mat`/`bo_nao`) nhưng quyết định KHÔNG làm vậy — đó là sửa một contract nền tảng
+  đã khoá chỉ để phục vụ một optional feature của riêng `dispatch()`; thêm tham số thứ 2 có
+  default `None` cho `dispatch()` là additive, không phá bất kỳ caller nào đang gọi
+  `dispatch(call)` một tham số.
+  - Verifier chỉ chạy khi CÓ engine gắn VÀ `result.ok is True` (tool tự báo cáo thành công) —
+    một tool tự báo `ok=False` đã là tín hiệu thất bại dứt khoát từ chính nó, không cần xác minh
+    thêm (đúng nghĩa "postcondition check" là xác nhận một CLAIM THÀNH CÔNG, không phải double
+    -check một thất bại đã khai báo).
+  - Map verdict: `VERIFIED` → im lặng, trả nguyên `result`, vẫn publish `tool.execution.finished`
+    như cũ (không đổi behavior khi verifier đồng ý với tool) — đúng tinh thần M4's `ALLOW` (im
+    lặng, không có event riêng). `FAILED`/`UNCERTAIN` → publish event TÊN RIÊNG
+    (`tool.verification.failed`/`tool.verification.uncertain`, khác `tool.execution.finished`)
+    kèm `VerificationError(reason)`, trả `ToolResult(ok=False, ...)` — GHI ĐÈ claim thành công
+    của tool (đây chính là lý do Verifier tồn tại: bắt tool nói dối/không chắc chắn). Ngắn mạch
+    hoàn toàn (không publish `finished` nữa) — đúng kiểu `_check_permission` trả `ToolResult`
+    không phải `None` thì `dispatch()` return ngay, không publish thêm gì.
+  - Verifier tự raise (`ChaosError`/exception lạ) → bắt giống `permission_engine`, map về
+    `tool.execution.failed` (lỗi hạ tầng, không phải một verdict hợp lệ).
+  - Cập nhật `tests/test_tool_router_boundaries.py`: tổng quát hoá check "chỉ được import
+    abstract contract" để bao phủ CẢ `bao_mat.contracts.permission_engine` (M4) LẪN
+    `kiem_tra.contracts.verifier` (M5) — router không bao giờ được import
+    `kiem_tra.verifier.ExecutionOutcomeVerifier` (concrete), y hệt lý do đã áp dụng cho
+    `bao_mat.engine`/`bao_mat.recording`.
+- **T5.1 — Verifier core:** `ExecutionOutcomeVerifier`, thuần policy, test độc lập.
+- **T5.2 — Wire vào ToolRouter:** optional `verifier` param + optional `expectation` param cho
+  `dispatch()`, 3 verdict map đúng, không phá test M3/M4 cũ, tổng quát hoá boundary test.
+- **T5.3 — Boundary & Integration/DoD:** boundary test cho `kiem_tra/verifier.py` (stdlib/
+  chaos-only, không đụng persistence/event_bus, không secret literal) + full verify + state +
+  report.
+- **Out of M5:** checker theo tool cụ thể (file tồn tại, HTTP 200, v.v. — chờ M6/M7); retry/
+  replan/escalate thật khi gặp UNCERTAIN (Agent Loop M15 — milestone này chỉ báo cáo trung thực,
+  không tự ý retry); bảng `verifications` riêng (không có trong DATA_MODEL.md, dùng chung
+  `audit_events` qua EventBus); wire `ToolRouter`+`Verifier` vào `ApplicationContext` (vẫn chưa
+  có tool registry thật, để dành như M3/M4 đã ghi).
 
 ## Milestone 4 Plan — Permission (ARCHITECTURE.md layer 6 "Permission Engine", TASKS.md #4)
 
@@ -322,6 +385,9 @@
   `bao_mat.contracts.permission_engine`, vẫn cấm import concrete engine). Không sửa
   `bao_mat/engine.py`/`recording.py`; `pyproject.toml`/`uv.lock` untouched.
 - T4.4: `tests/test_bao_mat_boundaries.py` (mới, 4 tests). Không sửa src nào.
+- T5.1: `src/chaos/kiem_tra/verifier.py` (mới) + `src/chaos/kiem_tra/__init__.py` (sửa: bỏ
+  "future:" khỏi docstring) + `tests/test_verifier.py` (mới, 6 tests). Không sửa
+  `contracts/verifier.py`; `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -425,6 +491,11 @@
   `engine.py`+`recording.py`, không cong_cu/ORM/SDK/shell literal, không secret-shaped literal,
   `engine.py` độc lập persistence — chỉ `recording.py` được biết); `uvx ruff check .` → pass
   ngay lần đầu; `uvx ruff format --check .` → 108 files pass; `uv run chaos` env sạch → exit 0.
+- T5.1: `uv run pytest -q` → **373 passed** (367 cũ xanh + 6 mới: là instance thật của
+  `Verifier`, không có condition khai báo → VERIFIED, có condition → UNCERTAIN (tên condition
+  xuất hiện trong reason), nhiều condition đều được nêu tên, `details` không đổi verdict, không
+  bao giờ tự trả FAILED); `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format --check .` →
+  110 files pass; `uv run chaos` env sạch → exit 0.
 
 ## Verification
 
@@ -503,6 +574,10 @@
   → dependency delta 0); secret scan trên `engine.py`/`recording.py`/`router.py`/toàn bộ test
   M4 → 0 match; boundary scan (stdlib/chaos-only, không cong_cu, `engine.py` không đụng
   persistence) → pass; `.env` không tồn tại; `./data/chaos.db` tạo bởi verify đã xóa.
+- T5.1: diff review → 1 file mới (`verifier.py`, chỉ import contract có sẵn + `ToolResult` type,
+  không I/O) + 1 dòng docstring sửa (`kiem_tra/__init__.py`) + 1 test mới (`pyproject.toml`/
+  `uv.lock` untouched → dependency delta 0); secret scan → 0 match; test riêng xác nhận không
+  bao giờ tự trả FAILED và `details` không đổi verdict; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -645,6 +720,15 @@
   thật (`StaticPermissionEngine`), có audit trail thật (`RecordingPermissionEngine` → bảng
   `permissions`), và đã wire vào `ToolRouter` với 3 verdict đúng nghĩa, không phá bất kỳ hành vi
   M3 nào khi không gắn engine.
+- T5.1: `ExecutionOutcomeVerifier` không bao giờ tự trả `FAILED` — nó không có domain-knowledge
+  để CHỨNG MINH một claim là sai, chỉ có thể thừa nhận "không xác nhận được" (`UNCERTAIN`); đây
+  là khác biệt cố tình so với `StaticPermissionEngine` (engine đó có thể trả `BLOCK` dứt khoát
+  vì `PermissionClass.BLOCK` là input tường minh, còn ở đây không có tín hiệu tường minh nào nói
+  "chắc chắn sai") — chỉ khi có checker theo tool cụ thể (M6/M7+) mới có đủ bằng chứng để trả
+  `FAILED`; verdict chỉ phụ thuộc `expectation.conditions` có rỗng hay không, ignorant của
+  `expectation.details` (cùng lý do "chống bypass theo nội dung" như M4); không I/O — không có
+  bảng `verifications` riêng vì DATA_MODEL.md không định nghĩa, audit trail sẽ đi qua
+  `EventBus`/`audit_events` có sẵn khi T5.2 wire vào `ToolRouter`, không cần sink mới.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -1007,11 +1091,37 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
     Milestone 4 Plan đã ghi trước khi code. Milestone 4 (Permission) HOÀN THÀNH. Không tự sang
     M5 — chờ lệnh user.
 
+- **T5.1 — Verifier Core (2026-09-17, user ra lệnh "tiếp tục M5", sau commit b6c0697):**
+  - `kiem_tra/verifier.py`: `ExecutionOutcomeVerifier(Verifier)` implementation thật đầu tiên
+    cho contract T0.2 — không có `expectation.conditions` khai báo → `VERIFIED` (tin theo
+    `result.ok`); có condition khai báo → `UNCERTAIN` (không có domain-knowledge để tự kiểm tra,
+    không được coi là VERIFIED chỉ vì không biết cách check). Không bao giờ tự trả `FAILED`
+    (không có bằng chứng để chứng minh sai). Ignorant của `expectation.details`. Không I/O.
+  - 6 tests mới (tổng 373 pass): là instance thật của `Verifier`, no-condition → VERIFIED,
+    condition → UNCERTAIN (tên xuất hiện trong reason), nhiều condition đều được nêu tên,
+    details không đổi verdict, không bao giờ trả FAILED.
+  - ruff + format pass ngay lần đầu; chaos exit 0. Dependency delta 0.
+  - AC T5.1: đúng scope Milestone 5 Plan, chưa wire ToolRouter (T5.2), chưa boundary test riêng
+    (T5.3).
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T5.1
+- Session: Milestone 5 — T5.1 Verifier Core
+- Completed: T5.1 (`kiem_tra/verifier.py`: `ExecutionOutcomeVerifier` — no condition→VERIFIED,
+  có condition→UNCERTAIN, không bao giờ tự FAILED, ignorant details; 6 tests, 373 pass,
+  ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 1 file mới + 1 dòng docstring sửa + 1 test mới (xem Changed Files)
+- Tests: pytest 373 passed (367 cũ xanh + 6 mới); pass ngay lần đầu
+- Decisions: không I/O, không bảng riêng (dùng audit_events có sẵn), không bao giờ tự trả FAILED
+  vì không có bằng chứng chứng minh sai, chỉ UNCERTAIN khi không biết cách check
+- Blockers: không
+- Next: T5.2 (wire optional verifier + expectation vào ToolRouter, map 3 verdict, tổng quát hoá
+  boundary test cho cả bao_mat lẫn kiem_tra)
 
 ## 2026-09-17 T4.4 (chốt M4)
 - Session: Milestone 4 — T4.4 Boundary & Integration/DoD
