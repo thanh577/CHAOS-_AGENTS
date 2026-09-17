@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.7 DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
-- **Last Completed Task:** T0.7 — Persistence/Application Lifecycle Integration
+- **Current Task:** T0.8 DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
+- **Last Completed Task:** T0.8 — Persistence Contract Hardening
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.8/M1+.
-- **Last Updated:** 2026-09-17 (T0.7 complete)
+- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.9/M1+.
+- **Last Updated:** 2026-09-17 (T0.8 complete)
 
 ## Completed Tasks
 
@@ -135,6 +135,9 @@
   `tests/test_persistence_integration.py` (mới, 15 tests),
   `tests/test_{bootstrap, bootstrap_boundaries (pathlib-exempt application.py),
   runtime_orchestrator, redaction}` (adapt).
+- T0.8: `src/chaos/ha_tang/persistence/{repository.py (ownership docs), sqlite_store.py
+  (update timestamps, _convert_row mapping)}` (sửa) + `tests/test_persistence_hardening.py`
+  (mới, 12 tests). Không sửa models/ABC-shape/backend-arch/migrations/app-integration.
 
 ## Tests
 
@@ -178,6 +181,10 @@
   db-lifecycle/logging/isolation); `uvx ruff check .` → pass (RUF022/I001 auto-fix + BLE001 noqa
   có lý do cho unwind-handler); `uvx ruff format --check .` → 86 files pass;
   `uv run chaos` env sạch → exit 0 (tạo `./data/chaos.db` đúng kỳ vọng, đã xóa sau verify).
+- T0.8: `uv run pytest -q` → **226 passed** (214 cũ xanh + 12 mới: update-timestamps/corrupt-row/
+  ownership-composition/migration-ordering/settings-matrix/type-boundary);
+  `uvx ruff check .` → pass (F841 dùng biến + SIM117 auto-style); `uvx ruff format --check .` → pass;
+  `uv run chaos` env sạch → exit 0 (db verify đã xóa).
 
 ## Verification
 
@@ -209,6 +216,10 @@
   dependency delta 0); secret scan → 0 match; forbidden-dep scan → 0 match;
   boundary scan (pathlib-exempt đúng `application.py`) → pass; `.env` không tồn tại;
   `./data/chaos.db` tạo bởi verify đã xóa, tree clean (`.gitignore` chặn `*.db`).
+- T0.8: diff review → 2 src sửa + 1 test mới (`pyproject.toml`/`uv.lock` untouched →
+  dependency delta 0); secret scan → 0 match; forbidden-dep scan → 0 match;
+  boundary scan (persistence modules, sqlalchemy Core-only) → pass; `.env` không tồn tại;
+  không `.db` artifact (tests `tmp_path`, db verify đã xóa).
 
 ## Important Technical Decisions
 
@@ -259,6 +270,9 @@
   DB = `data_dir/chaos.db`, không config field mới; mkdir + OSError→ConfigurationError (không log path);
   stop-fail không close (runtime còn sống); `persistence.created` cố tình không phát;
   `scrub_known_secrets` đóng leak secret-trong-exception-message.
+- T0.8: `update()` giữ `created_at` + refresh `updated_at` + trả copy mới (không ghi nguyên entity);
+  row hỏng → `ValidationError` (không rò ValueError/KeyError); ownership explicit trong contract;
+  secret-category settings để tương lai (M0 settings là plain strings — documented).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -293,6 +307,9 @@
 
 ## Spec References Used
 
+- T0.8: `AGENTS.md`, `CHAOS_STATE.md`, `README.md`, `docs/README.md`, `docs/spec/ARCHITECTURE.md`,
+  `docs/spec/CONTRACTS.md`, `docs/spec/DATA_MODEL.md`, `docs/spec/SECURITY.md`, `docs/spec/TESTING.md`,
+  `docs/spec/DEFINITION_OF_DONE.md`, `docs/spec/AGENT_RULES.md` (+ nền T0.1–T0.7 giữ nguyên).
 - T0.7: `AGENTS.md`, `CHAOS_STATE.md`, `README.md`, `docs/README.md`, `docs/spec/ARCHITECTURE.md`,
   `docs/spec/CONTRACTS.md`, `docs/spec/DATA_MODEL.md`, `docs/spec/SECURITY.md`, `docs/spec/TESTING.md`,
   `docs/spec/DEFINITION_OF_DONE.md`, `docs/spec/AGENT_RULES.md` (+ nền T0.1–T0.6 giữ nguyên).
@@ -334,6 +351,8 @@ DoD 27/27 có evidence. Không T0.7/M1+.
 2026-09-17 — T0.6 compliance (Case B) hoàn tất: SQLAlchemy Core 2.0.54 + Migration registry,
 giữ nguyên models/ABC/API, 199 tests pass, ruff/format pass, dep delta = sqlalchemy theo spec,
 chaos exit 0, uv.lock consistent. Không T0.7/M1+.
+2026-09-17 — T0.8 hoàn tất: audit persistence contract, fix update-timestamps + corrupt-row mapping +
+ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD 26/26. Không T0.9/M1+.
 2026-09-17 — T0.7 hoàn tất: Application sở hữu Runtime + Persistence (siblings), frozen context
 + persistence, startup/shutdown ordering + failure unwind + persistence events + scrub_known_secrets,
 214 tests pass, ruff/format pass, dep delta 0, chaos env sạch exit 0. DoD 26/26. Không T0.8/M1+.
@@ -403,11 +422,35 @@ chaos exit 0, uv.lock consistent. Không T0.7/M1+.
   - 214 tests (199 cũ adapt + 15 mới); ruff + format pass; chaos env sạch exit 0; dep delta 0.
   - AC T0.7: DoD 26/26 đạt (xem T0.7 report). Không workflow M1+, không T0.8.
 
+- **T0.8 — Persistence Contract Hardening (2026-09-17, sau commit 7f4e359):**
+  - Audit toàn bộ persistence theo §3–§13: phần lớn VERIFIED bằng evidence (models, FK, tx nesting,
+    migrations fresh/repeat/upgrade/failure/duplicate, error mapping, redaction, Core+bound params,
+    audit append-only, settings unique, app integration, single-thread documented, no-ORM, no-timeout).
+  - GAPS đã fix (minimal, không rewrite): (1) `update()` giờ giữ `created_at` immutable + refresh
+    `updated_at` + trả bản copy mới (trước đây ghi nguyên entity caller đưa); (2) row hỏng
+    (JSON vỡ, thiếu cột, naive time) trong get/list map về `ValidationError` thay vì rò
+    ValueError/KeyError thô; (3) ownership ghi explicit vào contract (method tự transaction,
+    caller compose qua outer tx); (4) tests bổ sung: multi-repo atomic, outer-commit giữ inner,
+    migration ordering (input đảo vẫn sort), settings create-duplicate, empty list, value-update,
+    non-leak backend types, JSON round-trip qua backend.
+  - Không đổi: models, ABC shape, backend architecture, migrations, app integration, dependencies.
+  - 226 tests (214 cũ xanh + 12 mới); ruff + format pass; chaos env sạch exit 0; dep delta 0.
+  - AC T0.8: DoD 26/26 đạt (xem T0.8 report). Không workflow M1+, không T0.9.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.8
+- Session: Milestone 0 — T0.8 Persistence Contract Hardening
+- Completed: T0.8 (audit §3–§13; fix update-timestamps + corrupt-row mapping + ownership docs; 12 tests, 226 pass, ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 2 src sửa + 1 test mới (xem Changed Files); models/ABC/backend/migrations/app-integration không đổi; pyproject/uv.lock không đổi
+- Tests: pytest 226 passed (214 cũ xanh + 12 mới); không coverage-chasing
+- Decisions: update giữ created_at + refresh updated_at + trả copy; corrupt-row → ValidationError; ownership explicit trong contract; secret-category settings để tương lai
+- Blockers: không — DoD 26/26 có evidence
+- Next: chờ lệnh milestone tiếp theo; KHÔNG T0.9/M1+
 
 ## 2026-09-17 T0.7
 - Session: Milestone 0 — T0.7 Persistence/Application Lifecycle Integration

@@ -31,7 +31,7 @@ original context, and messages never embed row values.
 import sqlite3
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -577,7 +577,18 @@ class SqliteRepository[T](Repository[T]):
             raise ExecutionError(f"cannot read {self._table.name} row") from exc
         if row is None:
             return None
-        return self._table.from_row(dict(row))
+        return self._convert_row(dict(row))
+
+    def _convert_row(self, data: dict[str, Any]) -> T:
+        """Map one row to its domain model. Corrupt stored data (bad
+        JSON, missing columns, naive timestamps) surfaces as
+        ``ValidationError`` — never a raw mapping/codec exception."""
+        try:
+            return self._table.from_row(data)
+        except ValidationError:
+            raise
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValidationError(f"invalid {self._table.name} row") from exc
 
     def list(self, *, limit: int = 100, offset: int = 0) -> list[T]:
         if limit < 0 or offset < 0:
@@ -597,11 +608,22 @@ class SqliteRepository[T](Repository[T]):
                 )
         except SQLAlchemyError as exc:
             raise ExecutionError(f"cannot list {self._table.name} rows") from exc
-        return [self._table.from_row(dict(row)) for row in rows]
+        return [self._convert_row(dict(row)) for row in rows]
 
     def update(self, entity: T) -> T:
+        """Replace a stored entity, returning the stored copy.
+
+        ``created_at`` is immutable: the stored value always wins, even
+        when the caller passes a different one. ``updated_at`` is
+        refreshed to now by the repository — callers never stamp it.
+        Entities are frozen, so the returned copy is a new object.
+        """
         table = self._sa_table()
-        values = self._values(entity)
+        current = self.get(self._values(entity)["id"])
+        if current is None:
+            raise ValidationError(f"{self._table.name} row does not exist")
+        stamped = replace(entity, created_at=current.created_at, updated_at=models.utcnow())
+        values = self._values(stamped)
         entity_id = values.pop("id")
         try:
             with self._database.transaction() as connection:
@@ -616,7 +638,7 @@ class SqliteRepository[T](Repository[T]):
             raise ValidationError(f"cannot update {self._table.name} row") from exc
         except SQLAlchemyError as exc:
             raise ExecutionError(f"cannot update {self._table.name} row") from exc
-        return entity
+        return stamped
 
     def delete(self, entity_id: str) -> bool:
         table = self._sa_table()

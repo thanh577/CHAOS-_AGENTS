@@ -5,6 +5,13 @@ foundation has no async DB boundary; a future async backend (or an
 SQLAlchemy implementation) implements this same shape or supersedes
 it with an async contract of its own. No SQLite types leak here —
 backends translate to and from domain models only.
+
+Transaction ownership: each method runs in its own transaction.
+Callers compose multiple calls inside an outer
+``Database.transaction()`` (SAVEPOINT nesting): an inner failure rolls
+back inner work only; an outer rollback discards everything including
+committed inner work; an outer commit keeps all inner work. Methods
+never return backend types — only domain models and primitives.
 """
 
 from abc import ABC, abstractmethod
