@@ -6,13 +6,49 @@
 
 ## Current State
 
-- **Status:** IN_PROGRESS (Milestone 1)
-- **Current Milestone:** 1 — Cloud Brain
-- **Current Task:** M1 DONE — T1.5 complete (chờ lệnh milestone tiếp theo)
-- **Last Completed Task:** M1 — Cloud Brain (T1.1–T1.5)
+- **Status:** IN_PROGRESS (Milestone 2)
+- **Current Milestone:** 2 — Event Bus
+- **Current Task:** T2.1 DONE — tiếp T2.2 (audit persistence sink)
+- **Last Completed Task:** T2.1 — EventBus Core (16 tests, 310 pass)
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không M2.
-- **Last Updated:** 2026-09-17 (M1 complete)
+- **Next Action:** Triển khai T2.2 → T2.3, đúng thứ tự, có test cho mỗi task.
+- **Last Updated:** 2026-09-17 (T2.1 complete)
+
+## Milestone 2 Plan — Event Bus (ARCHITECTURE.md layer 9, TASKS.md #2)
+
+- **Scope:** `ha_tang/contracts/events.py` (T0.2/T0.4) đã định nghĩa envelope `Event` +
+  `is_conventional_name`, docstring ghi rõ "Bus implementation, subscription, persistence
+  and replay belong to later milestones" — M2 hiện thực đúng phần đó: in-process publish/
+  subscribe (sync, stdlib-only), subscriber isolation (1 subscriber lỗi không phá subscriber
+  khác/không phá publisher), và một sink nối Event Bus → `audit_events` repository đã có sẵn
+  từ T0.6 (append-only, chưa ai ghi vào thực tế). KHÔNG async bus (foundation sync, theo
+  precedent T0.6 MemoryStore-async-để-M8-quyết); KHÔNG wildcard prefix (`tool.*`) — chỉ exact
+  match + wildcard toàn cục `"*"` (tối thiểu, reversible, mở rộng khi có consumer thật ở M3+
+  cần). KHÔNG wire EventBus vào `ApplicationContext`/thay thế `log_event` trong
+  `application.py` (giữ độc lập như Brain ở M1 — wiring thật để dành milestone cần dùng nó,
+  ví dụ Tool Framework M3 hoặc Permission M4 phát sự kiện thật).
+- **T2.1 — EventBus core** (`ha_tang/event_bus.py`): `subscribe(event_type_or_"*", subscriber)`
+  trả `Subscription` token để `unsubscribe` (idempotent, không raise nếu gọi lại/token lạ);
+  `publish(event)` validate `event.event_type` qua `is_conventional_name` (raise
+  `ValidationError` nếu sai convention) rồi gọi các subscriber khớp (exact + `"*"`) theo đúng
+  thứ tự đăng ký, snapshot danh sách subscriber trước khi gọi (an toàn nếu subscriber tự
+  subscribe/unsubscribe trong lúc được gọi); subscriber ném lỗi → bắt, log qua `log_event`
+  (ERROR, kèm event_type/source, không nuốt lỗi — có log, không phải `except: pass`), tiếp
+  tục các subscriber còn lại, `publish()` không bao giờ raise vì lỗi subscriber. Một
+  `threading.Lock` bảo vệ thao tác đọc/ghi danh sách subscriber (không cam kết concurrent
+  publish ordering, chỉ tránh "mutate during iterate").
+- **T2.2 — Audit persistence sink** (`ha_tang/event_sinks.py`): `AuditEventSink` bọc
+  `Repository[AuditEvent]` (từ `repositories(db)["audit_events"]` đã có sẵn), khả dụng trực
+  tiếp như một subscriber (`__call__(event)`); map `Event` → `AuditEvent` qua
+  `event.safe_payload()` (redact trước khi persist — không bao giờ lưu secret thô, dùng lại
+  `redact_mapping` đã có từ T0.4). Không đổi model/repository/schema hiện có.
+- **T2.3 — Boundary & Integration/DoD:** `test_event_bus_boundaries.py` (theo đúng mẫu
+  `test_brain_boundaries.py`: stdlib/chaos-only imports, không đụng `bao_mat`/`cong_cu`, không
+  secret-shaped literal) cho cả `event_bus.py` + `event_sinks.py`; full suite + ruff +
+  `uv run chaos` + state + report.
+- **Out of M2:** wire EventBus vào Application/Runtime Service thật, wildcard prefix
+  subscription, async subscriber, event replay API mới (list() của repository đã đủ dùng
+  tạm), cross-process bus, persistence backend khác ngoài SQLite hiện có.
 
 ## Milestone 1 Plan — Cloud Brain (AGENTS.md §12)
 
@@ -171,6 +207,8 @@
   `src/chaos/bo_nao/{http_transport,openai_compat,brain}.py` (mới),
   `tests/test_{brain_config,http_transport,openai_compat,brain,brain_boundaries}.py` (mới, 68 tests).
   `pyproject.toml`/`uv.lock` untouched.
+- T2.1: `src/chaos/ha_tang/event_bus.py` (mới) + `tests/test_event_bus.py` (mới, 16 tests).
+  Không sửa file nào khác; `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -221,6 +259,11 @@
 - M1: `uv run pytest -q` → **294 passed** (226 cũ xanh + 68 mới: config 21/transport 16/adapter 13/
   runtime 15/boundaries 3); `uvx ruff check .` → pass; `uvx ruff format --check .` → 93 files pass;
   `uv run chaos` env sạch → exit 0 (entrypoint M0 giữ nguyên, banner chưa đổi).
+- T2.1: `uv run pytest -q` → **310 passed** (294 cũ xanh + 16 mới: exact/wildcard delivery,
+  registration order, unsubscribe idempotent, malformed subscribe/publish target reject,
+  subscriber isolation + error logging metadata-only, self-unsubscribe-during-publish snapshot
+  an toàn, concurrent subscribe/publish smoke test); `uvx ruff check .` → pass (1 import-sort
+  auto-fix + 2 BLE001 noqa có lý do cho smoke test); `uvx ruff format --check .` → 96 files pass.
 
 ## Verification
 
@@ -260,6 +303,9 @@
   (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match;
   forbidden-dep/SDK scan → 0 match; boundary scan (bo_nao: stdlib/chaos-only, no-ORM/SDK,
   no-permission/executor) → pass; `.env` không tồn tại; tests chỉ dùng fake local server.
+- T2.1: diff review → 1 file mới (`event_bus.py`, stdlib + `chaos.ha_tang.*` only) + 1 test mới
+  (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match;
+  không đụng `bao_mat`/`cong_cu`/persistence; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -318,6 +364,15 @@
   socket-timeout (không thread-leak); SSE batch-read + async-yield (incremental deferred);
   estimate chars/4 heuristic; Brain độc lập ApplicationContext; model không quyết permission
   (tool calls là DATA — boundary test cấm chạm bao_mat/cong_cu).
+- T2.1: `EventBus` sync/in-process (không async, theo precedent foundation-sync); chỉ exact
+  match + wildcard toàn cục `"*"` (không prefix wildcard — mở rộng khi có consumer thật);
+  snapshot danh sách subscriber dưới lock trước khi gọi (subscriber tự (un)subscribe trong
+  lúc publish không làm hỏng lượt publish hiện tại, không deadlock vì gọi subscriber ngoài
+  `with self._lock`); subscriber lỗi → catch + `log_event` ERROR (metadata only) + tiếp tục,
+  `publish()` không bao giờ raise vì lỗi subscriber; `publish()`/`subscribe()` validate
+  `event_type` qua `is_conventional_name` (fail-fast, không âm thầm không khớp ai);
+  `Subscription` là dataclass frozen mang token ẩn, không phải public contract để so sánh
+  field; `unsubscribe` idempotent (bus lạ/token đã gỡ → no-op, không raise).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -500,11 +555,40 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - 294 tests (226 cũ xanh + 68 mới); ruff + format pass; chaos exit 0; dep delta 0.
     Brain độc lập ApplicationContext (wire ở milestone sau). Không agent loop/tool-exec/M2.
 
+- **T2.1 — EventBus Core (2026-09-17, sau commit e8783c6):**
+  - Hiện thực đúng phần `ha_tang/contracts/events.py` (T0.2/T0.4) đã khai báo là để dành:
+    "Bus implementation, subscription... belong to later milestones".
+  - `ha_tang/event_bus.py`: `EventBus.subscribe(event_type|"*", subscriber) -> Subscription`,
+    `unsubscribe(subscription)` (idempotent), `publish(event)` (validate naming convention,
+    gọi subscriber khớp theo thứ tự đăng ký — exact trước, wildcard sau — snapshot dưới lock
+    để an toàn khi subscriber tự (un)subscribe giữa lúc đang publish; subscriber lỗi bị bắt +
+    log ERROR metadata-only qua `log_event`/`format_error`, không raise ra ngoài, không chặn
+    subscriber còn lại). `subscriber_count()` cho test/introspection. Stdlib-only
+    (`threading.Lock`), không dependency mới, không đụng persistence/bao_mat/cong_cu.
+  - 16 tests mới (tổng 310 pass): exact/wildcard/multi-subscriber ordering, unsubscribe +
+    idempotency, malformed-target reject (subscribe lẫn publish), subscriber-isolation +
+    error-logging, self-unsubscribe-during-publish, concurrent subscribe/publish smoke test.
+  - ruff + format pass; chaos exit 0 (không đổi entrypoint). Dependency delta 0.
+  - AC T2.1: đúng scope Milestone 2 Plan, không chạm sang T2.2 (audit sink)/T2.3 (boundary+DoD).
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T2.1
+- Session: Milestone 2 — T2.1 EventBus Core
+- Completed: T2.1 (`event_bus.py`: publish/subscribe sync in-process, exact+wildcard, subscriber
+  isolation + error logging, unsubscribe idempotent, naming-convention validation; 16 tests, 310
+  pass, ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 1 file mới + 1 test mới (xem Changed Files); không sửa file nào khác
+- Tests: pytest 310 passed (294 cũ xanh + 16 mới); 1 lỗi test-helper tự sửa trong lúc viết
+  (`_event()` truyền `source` trùng keyword) — không phải lỗi implementation
+- Decisions: sync/in-process only, exact+wildcard `"*"` (không prefix wildcard), snapshot dưới
+  lock trước khi gọi subscriber, publish() không raise vì lỗi subscriber
+- Blockers: không
+- Next: T2.2 (audit persistence sink nối EventBus → audit_events repository có sẵn)
 
 ## 2026-09-17 M1 plan
 - Session: Milestone 1 — Cloud Brain plan (read specs, no code yet)
