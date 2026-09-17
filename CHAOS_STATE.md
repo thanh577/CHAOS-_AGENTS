@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.2 DONE — T0.3 chưa được giao (waiting for command)
-- **Last Completed Task:** T0.2 — Core Foundation Contracts
+- **Current Task:** T0.3 DONE — T0.4 chưa được giao (waiting for command)
+- **Last Completed Task:** T0.3 — Configuration & Application Bootstrap
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh T0.3. Không tự chuyển milestone.
-- **Last Updated:** 2026-09-17 (T0.2 complete)
+- **Next Action:** Chờ lệnh T0.4. Không tự chuyển milestone.
+- **Last Updated:** 2026-09-17 (T0.3 complete)
 
 ## Completed Tasks
 
@@ -40,6 +40,22 @@
     stdlib-only, no network/shell/fs, Tool không chạm PermissionEngine, AI/voice không vendor-lock.
   - AC T0.2: 17/17 đạt (xem T0.2 report). Không implementation thật, không vượt scope M0.
 
+- **T0.3 — Configuration & Application Bootstrap (2026-09-17):**
+  - `cau_hinh/`: `Secret` (repr/str redacted, chỉ `expose()`), 6 nhóm settings frozen
+    (App/Logging/Runtime/AI-placeholder/Storage-location/Security), `ChaosSettings.from_env`
+    đọc `CHAOS_*` từ mapping truyền vào hoặc process env — không đọc `.env`, không dotenv.
+    Validation bằng `ConfigurationError`: env/level/bool/timeout(0< t <=600)/data_dir/debug-vs-prod;
+    production yêu cầu AI credentials (message chỉ nêu tên biến, không echo giá trị).
+  - `ha_tang/`: `Runtime` (CREATED→INITIALIZED→RUNNING→STOPPING→STOPPED + history, sai thứ tự
+    raise `ValidationError`), `ApplicationContext` + `Application` (DI rõ ràng, không singleton),
+    `configure_logging`/`safe_summary` (stdlib, deterministic, secrets excluded).
+  - `main.py`: load config → banner CLI → `create_application().run()` → exit code
+    (0 ok, 2 config error ra stderr); CI-safe không cần API key.
+  - `.env.example` cập nhật đúng tên biến loader (commented placeholders).
+  - 30 tests mới (tổng 80 pass); ruff + format pass; boundary tests chứng minh stdlib-only,
+    no network/shell/fs/dotenv, no secret literals. 0 dependency mới.
+  - AC T0.3: 26/26 đạt (xem T0.3 report). Không AI/executor/DB/GUI/voice/avatar, không vượt scope M0.
+
 ## Changed Files
 
 - T0.1 (commit 98fd45c, 41 files): `.gitignore`, `.env.example`, `.python-version`, `pyproject.toml`, `uv.lock`,
@@ -50,6 +66,9 @@
   (`ha_tang`: errors/common/events; `bo_nao`: ai_provider/stt_provider/tts_provider;
   `cong_cu`: tool; `tri_nho`: memory_store; `bao_mat`: permission_engine; `kiem_tra`: verifier)
   + 8 test files (`test_contract_kernel/tool/ai_provider/memory/permission/verifier/voice/boundaries`).
+- T0.3: `src/chaos/cau_hinh/{secrets,settings}.py` (mới) + `__init__.py` (re-export),
+  `src/chaos/ha_tang/{runtime,logging,application}.py` (mới), `src/chaos/main.py` (bootstrap),
+  `.env.example` (tên biến khớp loader), 3 test files (`test_config/bootstrap/bootstrap_boundaries`).
 
 ## Tests
 
@@ -63,6 +82,11 @@
 - Lint/format: `uvx ruff check` → pass (12 lỗi auto-fix ban đầu: `typing.Mapping`→`collections.abc`,
   `__all__` sort, `datetime.UTC`, import sort); `uvx ruff format --check` → pass.
 - Import/entry: `uv run python -c "import chaos"` → 0.0.1; `uv run chaos` → banner + exit 0.
+- T0.3: `uv run pytest -q` → **80 passed** (50 cũ + 30 mới: config defaults/override/validation/
+  production-required/redaction; bootstrap wiring/lifecycle/entrypoint; boundaries stdlib-only +
+  no network/shell/fs/dotenv + no secret literals).
+- Lint/format T0.3: `uvx ruff check` → pass (1 lỗi auto-fix: `__all__` sort);
+  `uvx ruff format --check` → 44 files pass.
 
 ## Verification
 
@@ -72,6 +96,9 @@
 - T0.2: `git status` trước commit → chỉ file mới T0.2 (tracked files untouched, `pyproject.toml`/`uv.lock`
   không đổi → 0 dependency mới); secret scan (key/token/private-key/password patterns trên
   src/tests/pyproject/env-example) → 0 match; `.env` không tồn tại.
+- T0.3: diff review → 3 files sửa (`main.py` bootstrap, `cau_hinh/__init__.py` re-export,
+  `.env.example` tên biến) + 8 files mới; `pyproject.toml`/`uv.lock` untouched → 0 dep mới;
+  secret scan → 0 match; forbidden-dep scan (pydantic/dotenv/SDK/…) → 0 match; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -93,6 +120,11 @@
   bắt buộc `confirmation_prompt` — ép bằng `__post_init__` + test.
 - T0.2: tên lỗi tránh shadow builtin — `PermissionDeniedError` (không `PermissionError`),
   `OperationTimeoutError` (không `TimeoutError`).
+- T0.3: bootstrap/context/runtime/logging đặt trong `ha_tang/` (infrastructure) để giữ layout
+  `REPOSITORY.md` (không package top-level mới); `cau_hinh/` giữ config (reversible).
+- T0.3: blank env var = unset (fallback default) cho mọi biến; production-gate yêu cầu AI credentials.
+- T0.3: `main()` không parse CLI args (không Typer theo policy); testability qua explicit mapping + monkeypatch env.
+- T0.3: `configure_logging` first-call-wins (deterministic); chỉ `safe_summary` (booleans, không values) được log.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -127,6 +159,8 @@
 
 ## Spec References Used
 
+- T0.3: `AGENTS.md`, `docs/spec/REPOSITORY.md`, `docs/spec/ARCHITECTURE.md`, `docs/spec/SECURITY.md`
+  (+ nền T0.1/T0.2 giữ nguyên).
 - T0.2: `AGENTS.md`, `docs/spec/CONTRACTS.md`, `docs/spec/ARCHITECTURE.md`, `docs/spec/REPOSITORY.md`
   (+ nền T0.1 giữ nguyên).
 - T0.1: `AGENTS.md`, `docs/spec/TASKS.md`, `docs/spec/REPOSITORY.md`, `docs/spec/ARCHITECTURE.md`,
@@ -139,12 +173,23 @@
 git + foundation + 3 tests pass + baseline commit 98fd45c. Không drift kiến trúc, không secret, không vượt scope M0.
 2026-09-17 — T0.2 hoàn tất: 7 contracts + shared kernel (errors/events/common), stdlib-only, 50 tests pass,
 ruff/format pass, 0 dep mới. AC 17/17. Dừng ở M0, chờ lệnh T0.3.
+2026-09-17 — T0.3 hoàn tất: config layer + bootstrap + runtime skeleton + logging, 80 tests pass,
+ruff/format pass, 0 dep mới. AC 26/26. Dừng ở M0, chờ lệnh T0.4.
 
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.3
+- Session: Milestone 0 — T0.3 Configuration & Application Bootstrap
+- Completed: T0.3 (Secret+6 settings groups+from_env validation, Runtime lifecycle, Application DI, logging, main bootstrap, .env.example; 3 test files, 80 tests pass, ruff/format pass)
+- Changed: 3 sửa + 8 mới (xem Changed Files); pyproject/uv.lock không đổi
+- Tests: pytest 80 passed (1 case blank-data_dir sửa thiết kế: blank=unset); boundary tests mới
+- Decisions: bootstrap/runtime/logging ở ha_tang, blank=unset, production-gate AI creds, main không CLI args, logging first-call-wins + safe_summary
+- Blockers: không
+- Next: chờ lệnh T0.4; không tự chuyển task/milestone
 
 ## 2026-09-17 T0.2
 - Session: Milestone 0 — T0.2 Core Foundation Contracts
