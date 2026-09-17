@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 2)
 - **Current Milestone:** 2 — Event Bus
-- **Current Task:** T2.1 DONE — tiếp T2.2 (audit persistence sink)
-- **Last Completed Task:** T2.1 — EventBus Core (16 tests, 310 pass)
+- **Current Task:** T2.2 DONE — tiếp T2.3 (boundary tests + Integration/DoD, chốt M2)
+- **Last Completed Task:** T2.2 — Audit Persistence Sink (7 tests, 317 pass)
 - **Blocked By:** Không
-- **Next Action:** Triển khai T2.2 → T2.3, đúng thứ tự, có test cho mỗi task.
-- **Last Updated:** 2026-09-17 (T2.1 complete)
+- **Next Action:** Triển khai T2.3 (boundary tests + full verify + state + commit cuối M2).
+- **Last Updated:** 2026-09-17 (T2.2 complete)
 
 ## Milestone 2 Plan — Event Bus (ARCHITECTURE.md layer 9, TASKS.md #2)
 
@@ -209,6 +209,8 @@
   `pyproject.toml`/`uv.lock` untouched.
 - T2.1: `src/chaos/ha_tang/event_bus.py` (mới) + `tests/test_event_bus.py` (mới, 16 tests).
   Không sửa file nào khác; `pyproject.toml`/`uv.lock` untouched.
+- T2.2: `src/chaos/ha_tang/event_sinks.py` (mới) + `tests/test_event_sinks.py` (mới, 7 tests).
+  Không sửa models/repository/sqlite_store; `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -264,6 +266,10 @@
   subscriber isolation + error logging metadata-only, self-unsubscribe-during-publish snapshot
   an toàn, concurrent subscribe/publish smoke test); `uvx ruff check .` → pass (1 import-sort
   auto-fix + 2 BLE001 noqa có lý do cho smoke test); `uvx ruff format --check .` → 96 files pass.
+- T2.2: `uv run pytest -q` → **317 passed** (310 cũ xanh + 7 mới: persist đúng field/timestamp,
+  redact payload trước khi ghi, id riêng mỗi row, wire qua wildcard trên EventBus thật, lỗi
+  sink bị EventBus cô lập, gọi sink trực tiếp thì lỗi repository thật vẫn propagate);
+  `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format --check .` → 97 files pass.
 
 ## Verification
 
@@ -306,6 +312,10 @@
 - T2.1: diff review → 1 file mới (`event_bus.py`, stdlib + `chaos.ha_tang.*` only) + 1 test mới
   (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match;
   không đụng `bao_mat`/`cong_cu`/persistence; `.env` không tồn tại.
+- T2.2: diff review → 1 file mới (`event_sinks.py`, chỉ dùng `Repository`/`AuditEvent`/`new_id`
+  có sẵn, không sửa persistence) + 1 test mới (`pyproject.toml`/`uv.lock` untouched →
+  dependency delta 0); secret scan → 0 match; redact-trước-khi-persist verify bằng test
+  (`s3cr3t-real-value` không xuất hiện trong row đã lưu); `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -373,6 +383,13 @@
   `event_type` qua `is_conventional_name` (fail-fast, không âm thầm không khớp ai);
   `Subscription` là dataclass frozen mang token ẩn, không phải public contract để so sánh
   field; `unsubscribe` idempotent (bus lạ/token đã gỡ → no-op, không raise).
+- T2.2: `AuditEventSink` chỉ là adapter mỏng (không thêm bảng/schema/migration mới) — nhận
+  thẳng `Repository[AuditEvent]` đã có từ T0.6 thay vì tự mở `SqliteDatabase` (giữ dependency
+  injection tường minh, tái dùng nguyên `repositories(db)["audit_events"]`); redact payload
+  qua `Event.safe_payload()` trước khi tạo `AuditEvent` (không bao giờ trưng secret thô ra
+  audit trail); gọi trực tiếp (không qua bus) thì lỗi repository propagate nguyên vẹn — cô
+  lập lỗi là trách nhiệm của `EventBus`, không phải của sink; chưa wire vào
+  `ApplicationContext` (để dành milestone có event producer thật, ví dụ M3 Tool Framework).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -571,11 +588,37 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - ruff + format pass; chaos exit 0 (không đổi entrypoint). Dependency delta 0.
   - AC T2.1: đúng scope Milestone 2 Plan, không chạm sang T2.2 (audit sink)/T2.3 (boundary+DoD).
 
+- **T2.2 — Audit Persistence Sink (2026-09-17, sau commit 5efa2fa):**
+  - `ha_tang/event_sinks.py`: `AuditEventSink(repository)` — callable subscriber, nhận
+    `Repository[AuditEvent]` (từ `repositories(db)["audit_events"]` có sẵn từ T0.6), map
+    `Event` → `AuditEvent` (id mới, `payload=event.safe_payload()` đã redact, `correlation_id`,
+    `created_at=updated_at=event.occurred_at`). Không sửa models/repository/sqlite_store,
+    không schema/migration mới.
+  - 7 tests mới (tổng 317 pass): persist đúng field, giữ nguyên timestamp từ `occurred_at`,
+    redact secret trước khi ghi (giá trị thật không xuất hiện trong row đã lưu), id riêng mỗi
+    event, wire qua `EventBus` thật bằng wildcard, lỗi sink (DB đã đóng) bị `EventBus` cô lập
+    (subscriber khác vẫn chạy, publish không raise), gọi sink trực tiếp (không qua bus) thì
+    lỗi repository thật vẫn propagate nguyên vẹn.
+  - ruff + format pass; chaos exit 0. Dependency delta 0.
+  - AC T2.2: đúng scope, chưa wire vào ApplicationContext (để dành milestone có producer thật).
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T2.2
+- Session: Milestone 2 — T2.2 Audit Persistence Sink
+- Completed: T2.2 (`event_sinks.py`: AuditEventSink adapter Event→AuditEvent, redact trước khi
+  persist, dùng nguyên Repository/audit_events có sẵn từ T0.6; 7 tests, 317 pass, ruff/format
+  pass, chaos exit 0, dep delta 0)
+- Changed: 1 file mới + 1 test mới (xem Changed Files); không sửa persistence hiện có
+- Tests: pytest 317 passed (310 cũ xanh + 7 mới), pass ngay lần đầu không phải sửa gì
+- Decisions: sink nhận Repository injected (không tự mở DB), lỗi trực tiếp thì propagate thật,
+  cô lập lỗi là việc của EventBus; chưa wire ApplicationContext
+- Blockers: không
+- Next: T2.3 (boundary tests cho event_bus.py + event_sinks.py, full verify, DoD, commit cuối M2)
 
 ## 2026-09-17 T2.1
 - Session: Milestone 2 — T2.1 EventBus Core
