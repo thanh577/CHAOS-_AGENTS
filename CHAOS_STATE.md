@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.5 gap-audit DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
-- **Last Completed Task:** T0.5 gap verification — Application Runtime Orchestration Foundation
+- **Current Task:** T0.6 DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
+- **Last Completed Task:** T0.6 — Persistence Foundation & Data Model
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.6/M1+.
-- **Last Updated:** 2026-09-17 (T0.5 gap-audit complete)
+- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.7/M1+.
+- **Last Updated:** 2026-09-17 (T0.6 complete)
 
 ## Completed Tasks
 
@@ -125,6 +125,8 @@
 - T0.5 gap-audit: `src/chaos/ha_tang/{application.py (log_event + per-run context), redaction.py
   (exact/endswith key match)}` + bổ sung `tests/test_runtime_orchestrator.py` (3 failure/event tests)
   và `tests/test_redaction.py` (1 precision regression test).
+- T0.6: `src/chaos/ha_tang/persistence/{__init__,models,repository,sqlite_store}.py` (mới) +
+  4 test files (`test_persistence_models/sqlite/security/boundaries`). Không sửa tracked files.
 
 ## Tests
 
@@ -157,6 +159,10 @@
   `uv run chaos` → exit 0 (không đổi behavior entrypoint).
 - T0.5 gap-audit: `uv run pytest -q` → **140 passed** (136 cũ + 4 mới); `uvx ruff check .` → pass;
   `uvx ruff format --check .` → pass (1 file reformat); `uv run chaos` env sạch → exit 0.
+- T0.6: `uv run pytest -q` → **194 passed** (140 cũ giữ xanh + 54 mới: models/invariants/serialization;
+  schema/CRUD/FK/tx/rollback/cleanup/append-only; injection/secret-safety; boundaries).
+- Lint/format T0.6: `uvx ruff check .` → pass (auto-fix sort + PEP 695 generics sửa tay + DTZ001 noqa
+  có lý do + SIM117 auto-fix); `uvx ruff format --check .` → 84 files pass; `uv run chaos` → exit 0.
 
 ## Verification
 
@@ -178,6 +184,10 @@
 - T0.5 gap-audit: diff review → 2 files sửa + 2 test files bổ sung (không phá T0.1–T0.5);
   `pyproject.toml`/`uv.lock` untouched → dependency delta 0; secret scan → 0 match;
   forbidden-subsystem scan (sdk/db/ui/network/sqlite/…) → 0 match; `.env` không tồn tại.
+- T0.6: diff review → chỉ files mới (tracked files untouched, `pyproject.toml`/`uv.lock` untouched →
+  dependency delta 0); secret scan → 0 match; forbidden-dep scan (orm/db-client/telemetry/…) → 0 match;
+  AST import scan (stdlib/`chaos` only) + sqlite-là-driver-duy-nhất → pass; `.env` không tồn tại;
+  không `.db` artifact trong repo (tests dùng `tmp_path`, `.gitignore` đã chặn `*.db`).
 
 ## Important Technical Decisions
 
@@ -215,6 +225,10 @@
 - T0.5 gap-audit: per-run `TraceContext` trong `run()` (reset khi exit, isolation giữ nguyên);
   `log_event` tái dùng thay vì log text mới; redaction exact/endswith (bare `auth` cố tình
   không phải stem để block có cấu trúc được recurse); không tạo recovery/retry framework.
+- T0.6: persistence ở `ha_tang/` (infrastructure, đúng precedent T0.2); sync vì foundation sync
+  (MemoryStore async để M8 quyết bridge); `pathlib` chỉ mang path đã cấu hình (fs writer duy nhất
+  là `sqlite3.connect` — boundary test ghi nhận ngoại lệ này); `AuditEvent` append-only ở repo level;
+  settings giữ `id` uniform + `key` UNIQUE; `schema_version` thay migration framework.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -277,12 +291,44 @@ Service hooks + shutdown/idempotency/no-restart + frozen context + failure class
 2026-09-17 — T0.5 gap-audit hoàn tất (không rollback a38b6d2): VERIFIED phần lớn yêu cầu;
 IMPLEMENTED 3 gaps (failure-path tests, lifecycle events + per-run context, redaction precision bug);
 140 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD 21/21 có evidence.
+2026-09-17 — T0.6 hoàn tất: 9 models + generic Repository + sqlite stdlib (schema_version 1,
+SAVEPOINT tx, append-only audit), 194 tests pass, ruff/format pass, dep delta 0, chaos exit 0.
+DoD 27/27 có evidence. Không T0.7/M1+.
+
+- **T0.6 — Persistence Foundation & Data Model (2026-09-17):**
+  - Spec basis: `DATA_MODEL.md` chỉ định nghĩa 9 tên bảng + SQLite/SQLAlchemy + migrations —
+    fields/relations/semantics do agent định nghĩa tối thiểu, reversible (ghi rõ trong report).
+  - Backend: stdlib `sqlite3` (đủ cho foundation) — KHÔNG SQLAlchemy/Alembic/Pydantic;
+    `Repository[T]` ABC backend-agnostic nên SQLAlchemy có thể thay thế sau không phá contract.
+  - `ha_tang/persistence/`: `models.py` (9 frozen dataclasses: id + UTC aware timestamps +
+    to_dict/from_dict, JSON deterministic cho metadata/payload); `repository.py` (generic sync
+    CRUD ABC — sync vì foundation sync); `sqlite_store.py` (`SqliteDatabase`: explicit path,
+    lazy connect, idempotent schema + `schema_version`=1, FK ON, SAVEPOINT nested transactions,
+    explicit close; `SqliteRepository[T]` parameterized-only; `ReadOnlyRepository` cho audit_events;
+    errors map về `ValidationError`/`ExecutionError` giữ `from` context, message không embed values).
+  - FKs chỉ cho cặp cha-con hiển nhiên (messages→sessions, task_steps→tasks,
+    tool_runs.task_id NULL→tasks); status là str thuần (spec không định nghĩa lifecycle values).
+  - Không tích hợp ApplicationContext (spec không yêu cầu — lifecycle độc lập, explicit;
+    milestone sau có thể attach như Service). Không DB khi import.
+  - Trong lúc test phát hiện transaction lồng nhau không rollback (repo tự commit) →
+    sửa bằng SAVEPOINT nesting + tests (inner-rollback giữ outer, outer-rollback xóa hết).
+  - 54 tests mới (tổng 194 pass); ruff + format pass; chaos exit 0. Dependency delta 0.
+  - AC T0.6: DoD 27/27 đạt (xem T0.6 report). Không workflow M1+, không T0.7.
 
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.6
+- Session: Milestone 0 — T0.6 Persistence Foundation & Data Model
+- Completed: T0.6 (9 models + Repository ABC + SqliteDatabase/SqliteRepository + schema_version + SAVEPOINT tx; 54 tests, 194 pass, ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 8 files mới (4 src + 4 tests, xem Changed Files); tracked files untouched
+- Tests: pytest 194 passed (140 cũ giữ xanh); 1 bug tx-nesting phát hiện và sửa trong lúc test
+- Decisions: stdlib sqlite3 (không SQLAlchemy), fields agent-defined tối thiểu, sync, FK tối thiểu, audit append-only, không tích hợp ApplicationContext, no-ORM descriptors
+- Blockers: không — DoD 27/27 có evidence
+- Next: chờ lệnh milestone tiếp theo; KHÔNG T0.7/M1+
 
 ## 2026-09-17 T0.5 gap-audit
 - Session: M0 T0.5 Completion Gap Verification (sau a38b6d2, không rollback)
