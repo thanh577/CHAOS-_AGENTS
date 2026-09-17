@@ -6,13 +6,13 @@
 
 ## Current State
 
-- **Status:** IN_PROGRESS (Milestone 4) — user đã ra lệnh "tiếp tục M4"
+- **Status:** IN_PROGRESS (Milestone 4)
 - **Current Milestone:** 4 — Permission
-- **Current Task:** T4.1 (PermissionEngine core: `StaticPermissionEngine`)
-- **Last Completed Task:** T3.3 — Boundary & Integration/DoD, chốt Milestone 3 (4 tests, 342 pass)
+- **Current Task:** T4.2 DONE — tiếp T4.3 (wire PermissionEngine vào ToolRouter)
+- **Last Completed Task:** T4.2 — Recording (`RecordingPermissionEngine`, 5 tests, 353 pass)
 - **Blocked By:** Không
-- **Next Action:** Triển khai T4.1.
-- **Last Updated:** 2026-09-17 (bắt đầu M4)
+- **Next Action:** Triển khai T4.3.
+- **Last Updated:** 2026-09-17 (T4.2 complete)
 
 ## Milestone 4 Plan — Permission (ARCHITECTURE.md layer 6 "Permission Engine", TASKS.md #4)
 
@@ -313,6 +313,8 @@
 - T3.3: `tests/test_tool_router_boundaries.py` (mới, 4 tests). Không sửa src nào.
 - T4.1: `src/chaos/bao_mat/engine.py` (mới) + `tests/test_permission_engine.py` (mới, 6 tests).
   Không sửa `contracts/permission_engine.py`/`common.py`; `pyproject.toml`/`uv.lock` untouched.
+- T4.2: `src/chaos/bao_mat/recording.py` (mới) + `tests/test_permission_recording.py` (mới, 5
+  tests). Không sửa `engine.py`/persistence; `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -398,6 +400,11 @@
   `input_summary`/`context` hoàn toàn, tên tool khác nhau → prompt khác nhau); `uvx ruff
   check .` → pass ngay lần đầu; `uvx ruff format --check .` → 104 files pass; `uv run chaos`
   env sạch → exit 0.
+- T4.2: `uv run pytest -q` → **353 passed** (348 cũ xanh + 5 mới: trả nguyên decision bên trong
+  không đổi, ghi đúng row `Permission` khớp tool_name/verdict/reason, CONFIRM/BLOCK ghi đúng
+  string verdict, mỗi lần check được id riêng, gọi trực tiếp lỗi repository thật propagate);
+  `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format --check .` → 106 files pass;
+  `uv run chaos` env sạch → exit 0.
 
 ## Verification
 
@@ -463,6 +470,10 @@
   không I/O) + 1 test mới (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret
   scan → 0 match; test riêng xác nhận quyết định không đổi dù `input_summary`/`context` khác
   nhau (không content-aware); `.env` không tồn tại.
+- T4.2: diff review → 1 file mới (`recording.py`, chỉ dùng `Repository[Permission]`/`Permission`
+  có sẵn từ T0.6, không sửa persistence) + 1 test mới (`pyproject.toml`/`uv.lock` untouched →
+  dependency delta 0); secret scan → 0 match; test riêng xác nhận lỗi repository thật propagate
+  khi gọi trực tiếp (đúng tinh thần T2.2); `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -570,6 +581,16 @@
   T4.2, giống tách `event_bus.py`/`event_sinks.py` ở M2); nhánh `BLOCK` viết tường minh (không
   dùng `else`) để một `PermissionClass` mới trong tương lai fail loud thay vì âm thầm rơi vào
   nhánh sai.
+- T4.2: `RecordingPermissionEngine` là Decorator (bọc một `PermissionEngine` khác qua
+  constructor), không phải subclass override — composable với bất kỳ engine nào tương lai
+  (kể cả engine content-aware chưa tồn tại); ghi thẳng qua `Repository[Permission]` (không qua
+  `EventBus`) vì quyết định permission là kết quả của một lời gọi request/response trực tiếp
+  cần được ghi nhận đáng tin cậy, không phải sự kiện fire-and-forget — giữ `bao_mat` không phụ
+  thuộc `ha_tang.event_bus` (đúng layer 6 không cần biết layer 9); bảng `permissions` (T0.6, đầy
+  đủ CRUD, không phải append-only như `audit_events`) chỉ dùng `.create()` — không bao giờ
+  `.update()`/`.delete()` một permission record, giữ nó là audit trail bất biến dù repository
+  không tự ép điều đó; lỗi repository thật propagate nguyên vẹn khi gọi trực tiếp (đúng tinh
+  thần T2.2, cô lập lỗi là việc của bên gọi/EventBus nếu có, không phải của sink/decorator).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -877,11 +898,36 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - ruff + format pass ngay lần đầu; chaos exit 0. Dependency delta 0.
   - AC T4.1: đúng scope Milestone 4 Plan, chưa có recording (T4.2), chưa wire ToolRouter (T4.3).
 
+- **T4.2 — Recording (2026-09-17, sau commit e574476):**
+  - `bao_mat/recording.py`: `RecordingPermissionEngine(PermissionEngine)` — Decorator bọc một
+    `PermissionEngine` khác, mỗi `check()` chạy engine trong rồi ghi 1 dòng `Permission` thật
+    (`tool_name`/`verdict`/`reason`) vào `Repository[Permission]` (DI qua constructor), trả
+    nguyên decision không đổi. Ghi thẳng qua repository, không qua EventBus.
+  - 5 tests mới (tổng 353 pass): decision trả về là chính object bên trong (identity), row
+    persist đúng field, CONFIRM/BLOCK ghi đúng string verdict, mỗi check 1 id riêng, lỗi
+    repository thật propagate khi gọi trực tiếp.
+  - ruff + format pass ngay lần đầu; chaos exit 0. Dependency delta 0.
+  - AC T4.2: đúng scope, `engine.py` không hề bị sửa — chỉ tái sử dụng qua composition.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T4.2
+- Session: Milestone 4 — T4.2 Recording
+- Completed: T4.2 (`bao_mat/recording.py`: `RecordingPermissionEngine` decorator ghi quyết định
+  vào bảng `permissions` thật qua Repository DI, trả nguyên decision; 5 tests, 353 pass,
+  ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 1 file mới + 1 test mới (xem Changed Files); không sửa `engine.py`
+- Tests: pytest 353 passed (348 cũ xanh + 5 mới); pass ngay lần đầu
+- Decisions: Decorator pattern (không subclass), ghi thẳng repository không qua EventBus (quyết
+  định request/response, không phải sự kiện fire-and-forget), chỉ `.create()` không bao giờ
+  update/delete permission row, lỗi repository propagate khi gọi trực tiếp
+- Blockers: không
+- Next: T4.3 (wire optional permission_engine vào ToolRouter, map 3 verdict, cập nhật boundary
+  test T3.3 cho import bao_mat.contracts hợp lệ)
 
 ## 2026-09-17 T4.1
 - Session: Milestone 4 — T4.1 PermissionEngine Core
