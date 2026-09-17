@@ -84,17 +84,49 @@ class RuntimeSettings:
 
 @dataclass(frozen=True)
 class AISettings:
-    """Placeholder for the future cloud-AI adapter (Milestone 1+).
+    """Cloud-AI adapter configuration (Milestone 1).
 
-    All fields optional outside production so CI and local runs work
-    without credentials. ``api_key`` is a :class:`Secret` — redacted
-    everywhere except :meth:`Secret.expose`.
+    Identity/credentials (provider, model, endpoint, api_key) plus
+    resilience knobs: bounded retries with backoff, and an optional
+    context budget enforced by the brain runtime. All fields optional
+    outside production so CI and local runs work without credentials.
+    ``api_key`` is a :class:`Secret` — redacted everywhere except
+    :meth:`Secret.expose`.
     """
 
     provider_name: str | None = None
     model: str | None = None
     endpoint: str | None = None
     api_key: Secret | None = None
+    max_retries: int = 3
+    retry_backoff_seconds: float = 1.0
+    max_context_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        if isinstance(self.max_retries, bool) or not isinstance(self.max_retries, int):
+            raise ConfigurationError(
+                f"invalid max retries: {self.max_retries!r} (expected an integer 0..10)"
+            )
+        if not 0 <= self.max_retries <= 10:
+            raise ConfigurationError(
+                f"invalid max retries: {self.max_retries!r} (expected an integer 0..10)"
+            )
+        backoff = self.retry_backoff_seconds
+        if not isinstance(backoff, (int, float)) or isinstance(backoff, bool):
+            raise ConfigurationError(
+                f"invalid retry backoff: {backoff!r} (expected seconds 0 < backoff <= 60)"
+            )
+        if not 0 < backoff <= 60:
+            raise ConfigurationError(
+                f"invalid retry backoff: {backoff!r} (expected seconds 0 < backoff <= 60)"
+            )
+        budget = self.max_context_tokens
+        if budget is not None and (
+            isinstance(budget, bool) or not isinstance(budget, int) or budget <= 0
+        ):
+            raise ConfigurationError(
+                f"invalid context budget: {budget!r} (expected a positive integer or unset)"
+            )
 
 
 @dataclass(frozen=True)
@@ -164,6 +196,27 @@ class ChaosSettings:
             ) from None
 
         api_key_raw = get("CHAOS_AI_API_KEY")
+        raw_retries = get("CHAOS_AI_MAX_RETRIES")
+        try:
+            max_retries = 3 if raw_retries is None else int(raw_retries)
+        except ValueError:
+            raise ConfigurationError(
+                f"invalid max retries: {raw_retries!r} (expected an integer 0..10)"
+            ) from None
+        raw_backoff = get("CHAOS_AI_RETRY_BACKOFF")
+        try:
+            backoff = 1.0 if raw_backoff is None else float(raw_backoff)
+        except ValueError:
+            raise ConfigurationError(
+                f"invalid retry backoff: {raw_backoff!r} (expected seconds 0 < backoff <= 60)"
+            ) from None
+        raw_budget = get("CHAOS_AI_MAX_CONTEXT_TOKENS")
+        try:
+            budget = None if raw_budget is None else int(raw_budget)
+        except ValueError:
+            raise ConfigurationError(
+                f"invalid context budget: {raw_budget!r} (expected a positive integer or unset)"
+            ) from None
         settings = cls(
             app=AppSettings(environment=environment, debug=debug),
             logging=LoggingSettings(level=log_level),
@@ -173,6 +226,9 @@ class ChaosSettings:
                 model=get("CHAOS_AI_MODEL"),
                 endpoint=get("CHAOS_AI_ENDPOINT"),
                 api_key=Secret(api_key_raw) if api_key_raw else None,
+                max_retries=max_retries,
+                retry_backoff_seconds=backoff,
+                max_context_tokens=budget,
             ),
             storage=StorageSettings(data_dir=data_dir),
             security=SecuritySettings(mask_secrets_in_logs=mask_secrets),

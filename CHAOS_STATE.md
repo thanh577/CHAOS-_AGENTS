@@ -6,13 +6,42 @@
 
 ## Current State
 
-- **Status:** IN_PROGRESS (Milestone 0)
-- **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.8 DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
-- **Last Completed Task:** T0.8 — Persistence Contract Hardening
+- **Status:** IN_PROGRESS (Milestone 1)
+- **Current Milestone:** 1 — Cloud Brain
+- **Current Task:** M1 DONE — T1.5 complete (chờ lệnh milestone tiếp theo)
+- **Last Completed Task:** M1 — Cloud Brain (T1.1–T1.5)
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.9/M1+.
-- **Last Updated:** 2026-09-17 (T0.8 complete)
+- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không M2.
+- **Last Updated:** 2026-09-17 (M1 complete)
+
+## Milestone 1 Plan — Cloud Brain (AGENTS.md §12)
+
+- **Scope:** adapter/interface + config + streaming + timeout/retry/backoff + rate-limit +
+  structured tool calls + context budget + graceful failure. Model không quyết permission
+  (Brain chỉ trả tool calls dạng DATA — execution thuộc M3+, loop thuộc M15).
+- **Không khóa vendor:** registry name→AIProvider + 1 reference adapter nói wire protocol mở
+  (OpenAI-compatible chat-completions qua stdlib HTTP, không SDK) — dùng được với mọi endpoint
+  tương thích, không chỉ OpenAI.
+- **T1.1 — Brain configuration:** mở rộng `AISettings` (`max_retries`, `retry_backoff_seconds`,
+  `max_context_tokens`) + env `CHAOS_AI_MAX_RETRIES/_RETRY_BACKOFF/_MAX_CONTEXT_TOKENS` +
+  validation + tests. 0 dep mới.
+- **T1.2 — HTTP transport:** sync core `http.client` + async wrapper (`asyncio.to_thread`,
+  không aiohttp/httpx) trong `bo_nao/http_transport.py`: timeout (socket-level, không thread-leak),
+  retry bounded (429 honor Retry-After capped + 5xx/connection-error; không retry 4xx),
+  backoff hàm mũ, map lỗi → ProviderError/OperationTimeoutError, chỉ log status (không log body).
+  Tests dùng fake `http.server` local (không network ngoài).
+- **T1.3 — Reference adapter** (`bo_nao/openai_compat.py`): build JSON (model/messages/tools→
+  functions/max_tokens/temperature/stream), parse response + tool_calls (arguments JSON hỏng →
+  ValidationError), SSE parse (batch-read + async-yield deltas, incremental-network deferred —
+  documented), usage passthrough, Bearer auth (expose tại send), endpoint http/https only.
+- **T1.4 — Brain runtime** (`bo_nao/brain.py`): registry + chọn provider theo config (unknown →
+  ConfigurationError), budget enforcement (estimate chars/4 heuristic, cắt messages cũ nhất giữ
+  system, deterministic), single-turn orchestration, graceful failure (mọi lỗi → taxonomy CHAOS),
+  log metadata-only (không log message content), boundary test (không import permission/executor).
+- **T1.5 Integration/DoD:** full suite + scans + state + report. KHÔNG đưa Brain vào
+  ApplicationContext (giữ independent như persistence pre-T0.7 — wire ở milestone sau).
+- **Out of M1:** agent loop (M15), tool execution (M3), memory (M8), permission workflows (M4),
+  vendor SDKs, adapter thứ hai, retry/recovery framework lớn.
 
 ## Completed Tasks
 
@@ -138,6 +167,10 @@
 - T0.8: `src/chaos/ha_tang/persistence/{repository.py (ownership docs), sqlite_store.py
   (update timestamps, _convert_row mapping)}` (sửa) + `tests/test_persistence_hardening.py`
   (mới, 12 tests). Không sửa models/ABC-shape/backend-arch/migrations/app-integration.
+- M1: `src/chaos/cau_hinh/settings.py` (AI knobs) + `.env.example` (3 vars) (sửa),
+  `src/chaos/bo_nao/{http_transport,openai_compat,brain}.py` (mới),
+  `tests/test_{brain_config,http_transport,openai_compat,brain,brain_boundaries}.py` (mới, 68 tests).
+  `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -185,6 +218,9 @@
   ownership-composition/migration-ordering/settings-matrix/type-boundary);
   `uvx ruff check .` → pass (F841 dùng biến + SIM117 auto-style); `uvx ruff format --check .` → pass;
   `uv run chaos` env sạch → exit 0 (db verify đã xóa).
+- M1: `uv run pytest -q` → **294 passed** (226 cũ xanh + 68 mới: config 21/transport 16/adapter 13/
+  runtime 15/boundaries 3); `uvx ruff check .` → pass; `uvx ruff format --check .` → 93 files pass;
+  `uv run chaos` env sạch → exit 0 (entrypoint M0 giữ nguyên, banner chưa đổi).
 
 ## Verification
 
@@ -220,6 +256,10 @@
   dependency delta 0); secret scan → 0 match; forbidden-dep scan → 0 match;
   boundary scan (persistence modules, sqlalchemy Core-only) → pass; `.env` không tồn tại;
   không `.db` artifact (tests `tmp_path`, db verify đã xóa).
+- M1: diff review → 2 src sửa (settings, env.example) + 3 src mới (bo_nao) + 5 test mới
+  (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match;
+  forbidden-dep/SDK scan → 0 match; boundary scan (bo_nao: stdlib/chaos-only, no-ORM/SDK,
+  no-permission/executor) → pass; `.env` không tồn tại; tests chỉ dùng fake local server.
 
 ## Important Technical Decisions
 
@@ -273,6 +313,11 @@
 - T0.8: `update()` giữ `created_at` + refresh `updated_at` + trả copy mới (không ghi nguyên entity);
   row hỏng → `ValidationError` (không rò ValueError/KeyError); ownership explicit trong contract;
   secret-category settings để tương lai (M0 settings là plain strings — documented).
+- M1: registry name→AIProvider + 1 reference adapter OpenAI-compatible qua stdlib (không SDK,
+  không khóa vendor); sync-core + `to_thread` (không aiohttp/httpx, dep delta 0);
+  socket-timeout (không thread-leak); SSE batch-read + async-yield (incremental deferred);
+  estimate chars/4 heuristic; Brain độc lập ApplicationContext; model không quyết permission
+  (tool calls là DATA — boundary test cấm chạm bao_mat/cong_cu).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -437,11 +482,38 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - 226 tests (214 cũ xanh + 12 mới); ruff + format pass; chaos env sạch exit 0; dep delta 0.
   - AC T0.8: DoD 26/26 đạt (xem T0.8 report). Không workflow M1+, không T0.9.
 
+- **M1 — Cloud Brain (2026-09-17, sau commit 746a947):**
+  - T1.1 config: `AISettings` + `max_retries` (0..10), `retry_backoff_seconds` (0..60],
+    `max_context_tokens` (positive|None) + 3 env vars + validation (21 tests).
+  - T1.2 transport (`bo_nao/http_transport.py`, stdlib http.client + to_thread, 0 dep):
+    socket-timeout, retry bounded (429 honor Retry-After capped; 5xx/conn-error; không retry 4xx),
+    backoff mũ capped, map lỗi → ProviderError/OperationTimeoutError/ConfigurationError,
+    body-cap 10MB, chỉ log status (16 tests vs fake local server).
+  - T1.3 adapter (`bo_nao/openai_compat.py`): wire JSON (model/messages/tools→functions/stream),
+    parse response + tool_calls (arguments hỏng → ValidationError), SSE batch-read + async-yield
+    (incremental-network deferred, documented), Bearer auth tại send, endpoint http/https only (13 tests).
+  - T1.4 runtime (`bo_nao/brain.py`): registry + chọn provider theo config, budget
+    (estimate chars/4, giữ system, drop-cũ-nhất, không truncate content), single-turn orchestration,
+    graceful failure (CHAOS pass-through, lạ → ProviderError), log metadata-only + scrub secrets,
+    boundary (không chạm permission/executor) (15 tests).
+  - T1.5: boundary tests M1 (stdlib/chaos-only, no-SDK/ORM, no-scope-leak) + full verify (3 tests).
+  - 294 tests (226 cũ xanh + 68 mới); ruff + format pass; chaos exit 0; dep delta 0.
+    Brain độc lập ApplicationContext (wire ở milestone sau). Không agent loop/tool-exec/M2.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 M1 plan
+- Session: Milestone 1 — Cloud Brain plan (read specs, no code yet)
+- Completed: đọc ARCHITECTURE/CONTRACTS/SECURITY/AGENTS-§12 + code hiện tại; ghi T1.1–T1.5 breakdown vào state
+- Changed: CHAOS_STATE.md (Current State + Milestone 1 Plan)
+- Tests: chưa có (breakdown only)
+- Decisions: registry + 1 reference adapter OpenAI-compatible qua stdlib (không SDK); sync-core + to_thread; SSE batch-read + async-yield; estimate chars/4; Brain độc lập ApplicationContext
+- Blockers: không
+- Next: implement T1.1; chỉ M1, không M2
 
 ## 2026-09-17 M0 review
 - Session: Milestone 0 pre-M1 review (read-only, không sửa code)
