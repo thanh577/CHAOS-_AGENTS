@@ -6,13 +6,44 @@
 
 ## Current State
 
-- **Status:** IN_PROGRESS (Milestone 2)
-- **Current Milestone:** 2 — Event Bus
-- **Current Task:** M2 DONE — T2.3 complete (chờ lệnh milestone tiếp theo)
-- **Last Completed Task:** M2 — Event Bus (T2.1–T2.3)
+- **Status:** IN_PROGRESS (Milestone 3)
+- **Current Milestone:** 3 — Tool Framework
+- **Current Task:** T3.1 DONE — tiếp T3.2 (audit event cho tool execution qua EventBus)
+- **Last Completed Task:** T3.1 — ToolRouter Core (11 tests, 332 pass)
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không M3.
-- **Last Updated:** 2026-09-17 (M2 complete)
+- **Next Action:** Triển khai T3.2 → T3.3, đúng thứ tự, có test cho mỗi task.
+- **Last Updated:** 2026-09-17 (T3.1 complete)
+
+## Milestone 3 Plan — Tool Framework (ARCHITECTURE.md layer 5 "Tool Router", TASKS.md #3)
+
+- **Scope:** `cong_cu/contracts/tool.py` (T0.2) đã khoá shape `Tool`/`ToolResult` và cấm module
+  đó chạm `PermissionEngine`. M3 xây phần còn thiếu để một `ToolCall` thật sự chạy được:
+  `ToolRouter` (không phải `Tool` contract — router là implementation, được phép biết khái
+  niệm permission, chỉ không được có PermissionEngine THẬT vì M4 chưa tồn tại) thực hiện đúng
+  core loop rút gọn của AGENTS.md (`validation → permission → executor`, verifier để dành M5):
+  lookup tool theo tên → `tool.validate()` → permission placeholder bảo thủ (**chỉ tool
+  `PermissionClass.SAFE` được tự chạy; `CONFIRM`/`BLOCK` bị từ chối thẳng bằng
+  `PermissionDeniedError`** — không có cách nào bypass vì chưa có PermissionEngine thật; thay
+  bằng policy thật ở M4 mà không đổi chữ ký `dispatch()`) → `tool.execute()` có timeout
+  (`tool.timeout_seconds`, dùng `asyncio.wait_for`). `ToolRouter.dispatch()` KHÔNG BAO GIỜ
+  raise — mọi nhánh lỗi (tool lạ, validate fail, permission fail, timeout, exception lạ từ
+  tool) đều map về `ToolResult(ok=False, error=...)` (đúng tinh thần "Tool result should be
+  standardized and machine-readable" của CONTRACTS.md — khác Brain M1 vốn raise vì Brain không
+  có khái niệm Result). Registry là `Mapping[str, Tool]` phẳng, không class riêng (giữ tối
+  giản, đúng precedent Brain M1 dùng dict thẳng cho provider).
+- **Publish audit event qua EventBus (M2)** — đây chính là "event producer thật" mà M2 để dành:
+  `tool.execution.started` / `.finished` / `.denied` / `.failed`, payload redact (không log
+  raw arguments/data — đúng AGENTS.md §11 "raw tool arguments" không được log). `EventBus` và
+  audit sink là optional (constructor param `event_bus: EventBus | None = None`) — router vẫn
+  chạy được không có bus, đúng kiểu DI tường minh đã dùng xuyên suốt project.
+- **T3.1 — ToolRouter core** (`cong_cu/router.py`): dispatch() như trên, không EventBus.
+- **T3.2 — Audit events cho tool execution**: thêm publish qua `EventBus` (optional) vào
+  `ToolRouter`, payload redact, verify qua `AuditEventSink` thật (tái dùng M2, không sửa).
+- **T3.3 — Boundary & Integration/DoD:** boundary test (stdlib/chaos-only, không đụng
+  `bao_mat` thật vì chưa tồn tại, không PermissionEngine literal ngoài tên biến/comment) + full
+  verify + state + report.
+- **Out of M3:** PermissionEngine thật (M4), Verifier thật (M5), tool cụ thể nào (browser M6,
+  OS M7 mới có), agent loop tự động gọi router (M15), CONFIRM flow tương tác với user.
 
 ## Milestone 2 Plan — Event Bus (ARCHITECTURE.md layer 9, TASKS.md #2)
 
@@ -212,6 +243,8 @@
 - T2.2: `src/chaos/ha_tang/event_sinks.py` (mới) + `tests/test_event_sinks.py` (mới, 7 tests).
   Không sửa models/repository/sqlite_store; `pyproject.toml`/`uv.lock` untouched.
 - T2.3: `tests/test_event_bus_boundaries.py` (mới, 4 tests). Không sửa src nào.
+- T3.1: `src/chaos/cong_cu/router.py` (mới) + `tests/test_tool_router.py` (mới, 11 tests).
+  Không sửa `contracts/tool.py`/`common.py`/`errors.py`; `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -275,6 +308,12 @@
   stdlib/chaos-only, no forbidden subsystem, no secret literal, event_bus.py độc lập
   persistence); `uvx ruff check .` → pass; `uvx ruff format --check .` → 98 files pass;
   `uv run chaos` env sạch → exit 0.
+- T3.1: `uv run pytest -q` → **332 passed** (321 cũ xanh + 11 mới: safe tool chạy + validate
+  coerce data, unknown-tool → ValidationError, validate fail → ValidationError, CONFIRM/BLOCK
+  bị từ chối → PermissionDeniedError, timeout → OperationTimeoutError, exception lạ ở
+  validate/execute không crash router, tool trả sai type bị bắt, call_id giữ nguyên qua mọi
+  nhánh lỗi, tool_names sorted); `uvx ruff check .` → pass (1 import thừa tự sửa);
+  `uvx ruff format --check .` → 100 files pass.
 
 ## Verification
 
@@ -325,6 +364,9 @@
   untouched → dependency delta 0); secret scan trên `event_bus.py`/`event_sinks.py`/toàn bộ
   test M2 → 0 match; boundary scan (stdlib/chaos-only, không `bao_mat`/`cong_cu`) → pass;
   `.env` không tồn tại; `./data/chaos.db` tạo bởi verify đã xóa.
+- T3.1: diff review → 1 file mới (`router.py`, không sửa `contracts/tool.py`) + 1 test mới
+  (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match; không
+  import `bao_mat` (không tồn tại) hay tên `PermissionEngine` thật; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -399,6 +441,15 @@
   audit trail); gọi trực tiếp (không qua bus) thì lỗi repository propagate nguyên vẹn — cô
   lập lỗi là trách nhiệm của `EventBus`, không phải của sink; chưa wire vào
   `ApplicationContext` (để dành milestone có event producer thật, ví dụ M3 Tool Framework).
+- T3.1: `ToolRouter` là implementation, không phải contract — được phép "biết" khái niệm
+  permission (import `PermissionClass`/`PermissionDeniedError`) mà không vi phạm boundary test
+  của `tool.py` (test đó chỉ khoá module `contracts/tool.py`, không khoá `router.py`); policy
+  SAFE-only cố tình bỏ qua `call` (không đọc arguments để quyết permission) để không thể vô
+  tình biến thành cách bypass; `dispatch()` không bao giờ raise (khác Brain M1 vốn raise) vì
+  `ToolResult` đã có invariant ok/error sẵn — đúng tinh thần "standardized, machine-readable"
+  của CONTRACTS.md; registry là `dict` phẳng, không class riêng (giữ nguyên mức tối giản như
+  Brain M1); `execute()` nhận `ToolCall` mới với arguments đã validate/normalize (không phải
+  arguments thô ban đầu) — tool luôn nhận input sạch.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -636,11 +687,36 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
     subscriber, không event replay API mới — đúng như Milestone 2 Plan đã ghi trước khi code.
     Không M3.
 
+- **T3.1 — ToolRouter Core (2026-09-17, sau commit d982748):**
+  - `cong_cu/router.py`: `ToolRouter(tools: Mapping[str, Tool]).dispatch(call) -> ToolResult`
+    thực hiện đúng core loop rút gọn `validation → permission(placeholder) → executor` (verifier
+    để dành M5). Permission placeholder bảo thủ: chỉ `PermissionClass.SAFE` được chạy;
+    `CONFIRM`/`BLOCK` bị từ chối bằng `PermissionDeniedError` (chưa có PermissionEngine thật).
+    Timeout qua `asyncio.wait_for(tool.timeout_seconds)` → `OperationTimeoutError`. `dispatch()`
+    không bao giờ raise: tool lạ/validate fail/permission fail/timeout/exception lạ từ
+    tool/tool trả sai type đều map về `ToolResult(ok=False, error=...)`.
+  - 11 tests mới (tổng 332 pass): happy path (coerce data qua validate), unknown tool, validate
+    fail, CONFIRM/BLOCK denied, timeout, exception lạ ở validate lẫn execute không crash router,
+    tool trả sai type bị bắt, call_id giữ nguyên qua mọi nhánh lỗi, tool_names sorted.
+  - ruff + format pass (1 import thừa tự sửa); chaos exit 0. Dependency delta 0.
+  - AC T3.1: đúng scope Milestone 3 Plan, chưa publish EventBus (T3.2) và chưa boundary+DoD (T3.3).
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T3.1
+- Session: Milestone 3 — T3.1 ToolRouter Core
+- Completed: T3.1 (`router.py`: validate → permission-placeholder (SAFE-only) → timeout-bounded
+  execute, dispatch() never raises; 11 tests, 332 pass, ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 1 file mới + 1 test mới (xem Changed Files); không sửa `contracts/tool.py`
+- Tests: pytest 332 passed (321 cũ xanh + 11 mới); pass ngay lần đầu
+- Decisions: SAFE-only permission placeholder cố tình bỏ qua `call`, dispatch() không raise
+  (khác Brain), registry dict phẳng, execute() nhận arguments đã normalize
+- Blockers: không
+- Next: T3.2 (publish audit event qua EventBus cho tool execution)
 
 ## 2026-09-17 T2.3 (chốt M2)
 - Session: Milestone 2 — T2.3 Boundary tests + Integration/DoD
