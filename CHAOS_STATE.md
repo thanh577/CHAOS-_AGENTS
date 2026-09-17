@@ -443,6 +443,15 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
 
+## 2026-09-17 M0 review
+- Session: Milestone 0 pre-M1 review (read-only, không sửa code)
+- Completed: audit T0.1–T0.8 + spec compliance; baseline sống (226 pass/0 skip, ruff/format pass, chaos exit 0, tree clean); 7/7 contracts abstract; secret scan 0; dep SQLAlchemy 2.0.54 + pytest; không subsystem M1+
+- Changed: chỉ entry này (không code)
+- Tests: pytest 226 passed (không skip), không assert rỗng
+- Decisions: M0 READY FOR M1; ghi nhận 2 drift comment cosmetic (env.example "no database in M0", thứ tự summary T0.8/T0.7) — không blocking, để milestone sau hoặc lệnh riêng
+- Blockers: không
+- Next: chờ lệnh M1 (cần order chi tiết như mọi task trước); KHÔNG tự sang M1
+
 ## 2026-09-17 T0.8
 - Session: Milestone 0 — T0.8 Persistence Contract Hardening
 - Completed: T0.8 (audit §3–§13; fix update-timestamps + corrupt-row mapping + ownership docs; 12 tests, 226 pass, ruff/format pass, chaos exit 0, dep delta 0)
