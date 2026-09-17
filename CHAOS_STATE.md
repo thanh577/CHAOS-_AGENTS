@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 3)
 - **Current Milestone:** 3 — Tool Framework
-- **Current Task:** T3.1 DONE — tiếp T3.2 (audit event cho tool execution qua EventBus)
-- **Last Completed Task:** T3.1 — ToolRouter Core (11 tests, 332 pass)
+- **Current Task:** T3.2 DONE — tiếp T3.3 (boundary tests + Integration/DoD, chốt M3)
+- **Last Completed Task:** T3.2 — Audit events cho Tool Execution (6 tests, 338 pass)
 - **Blocked By:** Không
-- **Next Action:** Triển khai T3.2 → T3.3, đúng thứ tự, có test cho mỗi task.
-- **Last Updated:** 2026-09-17 (T3.1 complete)
+- **Next Action:** Triển khai T3.3 (boundary tests + full verify + state + commit cuối M3).
+- **Last Updated:** 2026-09-17 (T3.2 complete)
 
 ## Milestone 3 Plan — Tool Framework (ARCHITECTURE.md layer 5 "Tool Router", TASKS.md #3)
 
@@ -245,6 +245,8 @@
 - T2.3: `tests/test_event_bus_boundaries.py` (mới, 4 tests). Không sửa src nào.
 - T3.1: `src/chaos/cong_cu/router.py` (mới) + `tests/test_tool_router.py` (mới, 11 tests).
   Không sửa `contracts/tool.py`/`common.py`/`errors.py`; `pyproject.toml`/`uv.lock` untouched.
+- T3.2: `src/chaos/cong_cu/router.py` (sửa: thêm `event_bus` param + publish 4 loại event) +
+  `tests/test_tool_router_events.py` (mới, 6 tests). Không sửa `event_bus.py`/`event_sinks.py`.
 
 ## Tests
 
@@ -314,6 +316,11 @@
   validate/execute không crash router, tool trả sai type bị bắt, call_id giữ nguyên qua mọi
   nhánh lỗi, tool_names sorted); `uvx ruff check .` → pass (1 import thừa tự sửa);
   `uvx ruff format --check .` → 100 files pass.
+- T3.2: `uv run pytest -q` → **338 passed** (332 cũ xanh + 6 mới: không có bus vẫn chạy được,
+  success → started+finished đúng thứ tự, unknown tool → chỉ failed, CONFIRM → chỉ denied
+  (không started), payload không bao giờ mang raw arguments/data thật, event chảy được vào
+  audit trail thật qua `AuditEventSink` từ M2); `uvx ruff check .` → pass; `uvx ruff format
+  --check .` → 101 files pass (2 file tự format lại).
 
 ## Verification
 
@@ -367,6 +374,10 @@
 - T3.1: diff review → 1 file mới (`router.py`, không sửa `contracts/tool.py`) + 1 test mới
   (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match; không
   import `bao_mat` (không tồn tại) hay tên `PermissionEngine` thật; `.env` không tồn tại.
+- T3.2: diff review → 1 file sửa (`router.py`, thêm event_bus optional) + 1 test mới
+  (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match; test
+  riêng xác nhận payload event không mang `data`/`arguments` thật (chỉ tool/call_id/error đã
+  redact); `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -450,6 +461,13 @@
   của CONTRACTS.md; registry là `dict` phẳng, không class riêng (giữ nguyên mức tối giản như
   Brain M1); `execute()` nhận `ToolCall` mới với arguments đã validate/normalize (không phải
   arguments thô ban đầu) — tool luôn nhận input sạch.
+- T3.2: `event_bus` là optional constructor param (router chạy được không cần bus, đúng kiểu
+  DI tường minh); payload chỉ gồm `tool`/`call_id` (qua `correlation_id`)/`error` (đã redact
+  qua `format_error`) — không bao giờ đưa `data`/`arguments` thật vào event (AGENTS.md §11);
+  "started" chỉ publish SAU permission pass (không publish cho unknown-tool/validate-fail/
+  denied — những nhánh đó publish thẳng "failed"/"denied", không có "started" trước đó vì
+  chưa từng thực sự chuẩn bị chạy); "finished" publish cả khi `result.ok=False` do chính tool
+  tự báo lỗi nghiệp vụ (khác với "failed" — đó là lỗi ở tầng router, không execute được).
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -701,11 +719,38 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - ruff + format pass (1 import thừa tự sửa); chaos exit 0. Dependency delta 0.
   - AC T3.1: đúng scope Milestone 3 Plan, chưa publish EventBus (T3.2) và chưa boundary+DoD (T3.3).
 
+- **T3.2 — Audit events cho Tool Execution (2026-09-17, sau commit 23ba3d1):**
+  - `router.py` thêm `event_bus: EventBus | None = None` (optional, DI tường minh) + publish 4
+    loại event qua `_publish`/`_fail`: `tool.execution.started` (chỉ sau khi qua permission,
+    trước khi execute), `.finished` (execute xong, kể cả `result.ok=False` do tool tự báo),
+    `.denied` (permission fail), `.failed` (mọi lỗi tầng router: unknown tool/validate/timeout/
+    exception lạ/sai type). Payload chỉ `tool`/`error` (đã qua `format_error` — redact), không
+    bao giờ có raw arguments/data; `correlation_id=call.call_id`.
+  - 6 tests mới (tổng 338 pass): không có bus vẫn chạy bình thường, success →
+    started+finished đúng thứ tự với payload đúng, unknown-tool → chỉ failed, CONFIRM → chỉ
+    denied (không có started vì chưa qua permission), payload không bao giờ chứa raw
+    argument/data thật (test trực tiếp), event chảy được vào audit trail thật qua
+    `AuditEventSink` (M2) không sửa gì ở đó.
+  - ruff + format pass (2 file tự format lại vì dòng dài); chaos exit 0. Dependency delta 0.
+  - AC T3.2: đúng scope, EventBus/AuditEventSink của M2 không hề bị sửa — chỉ tái sử dụng.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T3.2
+- Session: Milestone 3 — T3.2 Audit events cho Tool Execution
+- Completed: T3.2 (`router.py` thêm event_bus optional + publish started/finished/denied/failed
+  qua EventBus M2, payload redact không raw data; 6 tests, 338 pass, ruff/format pass, chaos
+  exit 0, dep delta 0)
+- Changed: 1 file sửa + 1 test mới (xem Changed Files); không sửa `event_bus.py`/`event_sinks.py`
+- Tests: pytest 338 passed (332 cũ xanh + 6 mới); pass ngay lần đầu
+- Decisions: started chỉ sau permission pass, finished kể cả ok=False (khác failed = lỗi
+  router), payload chỉ tool/call_id/error đã redact, event_bus optional không phá caller cũ
+- Blockers: không
+- Next: T3.3 (boundary tests + full verify + state + commit cuối M3)
 
 ## 2026-09-17 T3.1
 - Session: Milestone 3 — T3.1 ToolRouter Core

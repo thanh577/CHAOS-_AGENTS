@@ -1,4 +1,4 @@
-"""Tool Router (Milestone 3, T3.1) — the runtime side of the ``Tool``
+"""Tool Router (Milestone 3) — the runtime side of the ``Tool``
 contract locked in T0.2.
 
 ``cong_cu/contracts/tool.py`` defines *what* a tool is and forbids
@@ -29,6 +29,14 @@ matching CONTRACTS.md's "Tool result should be standardized and
 machine-readable". This is a deliberate difference from
 ``BrainRuntime``, which raises: Brain has no result envelope of its
 own, while ``Tool`` already does.
+
+T3.2 adds an audit trail: an optional ``EventBus`` (Milestone 2) is
+the "real event producer" that bus was built for. Published event
+types are ``tool.execution.started`` / ``.finished`` / ``.denied`` /
+``.failed`` — payloads carry only tool name, call id and (for
+failures) a redacted one-line error via ``format_error``. Raw call
+arguments and raw tool output are never published (AGENTS.md section
+11: no raw tool arguments in logs/audit).
 """
 
 import asyncio
@@ -44,6 +52,11 @@ from chaos.ha_tang.contracts.errors import (
     PermissionDeniedError,
     ValidationError,
 )
+from chaos.ha_tang.contracts.events import Event
+from chaos.ha_tang.event_bus import EventBus
+from chaos.ha_tang.redaction import format_error
+
+SOURCE = "cong_cu"
 
 
 def _is_permitted(tool: Tool, call: ToolCall) -> bool:
@@ -61,85 +74,93 @@ def _is_permitted(tool: Tool, call: ToolCall) -> bool:
 class ToolRouter:
     """Dispatches structured ``ToolCall``s to registered ``Tool``s."""
 
-    def __init__(self, tools: Mapping[str, Tool]) -> None:
+    def __init__(self, tools: Mapping[str, Tool], event_bus: EventBus | None = None) -> None:
         self._tools = dict(tools)
+        self._event_bus = event_bus
 
     @property
     def tool_names(self) -> tuple[str, ...]:
         """Registered tool names, sorted for deterministic reporting."""
         return tuple(sorted(self._tools))
 
+    def _publish(self, event_type: str, call: ToolCall, **payload: Any) -> None:
+        if self._event_bus is None:
+            return
+        self._event_bus.publish(
+            Event(
+                event_type=event_type,
+                source=SOURCE,
+                payload={"tool": call.name, **payload},
+                correlation_id=call.call_id,
+            )
+        )
+
+    def _fail(self, call: ToolCall, tool_name: str, error: ChaosError) -> ToolResult:
+        self._publish("tool.execution.failed", call, error=format_error(error))
+        return ToolResult(ok=False, tool=tool_name, error=error, call_id=call.call_id)
+
     async def dispatch(self, call: ToolCall) -> ToolResult:
         """Run the reduced core loop for one call. Never raises."""
         tool = self._tools.get(call.name)
         if tool is None:
-            return ToolResult(
-                ok=False,
-                tool=call.name,
-                error=ValidationError(
+            return self._fail(
+                call,
+                call.name,
+                ValidationError(
                     f"unknown tool: {call.name!r} (available: {', '.join(self.tool_names)})"
                 ),
-                call_id=call.call_id,
             )
 
         try:
             validated_arguments: dict[str, Any] = await tool.validate(dict(call.arguments))
         except ChaosError as exc:
-            return ToolResult(ok=False, tool=tool.name, error=exc, call_id=call.call_id)
+            return self._fail(call, tool.name, exc)
         except Exception as exc:  # noqa: BLE001 — a tool's validate() must never crash the router
-            return ToolResult(
-                ok=False,
-                tool=tool.name,
-                error=ValidationError(f"tool validate() raised: {exc}"),
-                call_id=call.call_id,
-            )
+            return self._fail(call, tool.name, ValidationError(f"tool validate() raised: {exc}"))
 
         if not _is_permitted(tool, call):
-            return ToolResult(
-                ok=False,
-                tool=tool.name,
-                error=PermissionDeniedError(
-                    f"tool {tool.name!r} requires permission class "
-                    f"{tool.permission.value!r} — no PermissionEngine attached (Milestone 4)"
-                ),
-                call_id=call.call_id,
+            error = PermissionDeniedError(
+                f"tool {tool.name!r} requires permission class "
+                f"{tool.permission.value!r} — no PermissionEngine attached (Milestone 4)"
             )
+            self._publish(
+                "tool.execution.denied",
+                call,
+                permission=tool.permission.value,
+                error=format_error(error),
+            )
+            return ToolResult(ok=False, tool=tool.name, error=error, call_id=call.call_id)
 
         normalized_call = ToolCall(
             name=call.name, arguments=validated_arguments, call_id=call.call_id
         )
+        self._publish("tool.execution.started", call)
         try:
             result = await asyncio.wait_for(
                 tool.execute(normalized_call), timeout=tool.timeout_seconds
             )
         except TimeoutError:
-            return ToolResult(
-                ok=False,
-                tool=tool.name,
-                error=OperationTimeoutError(
+            return self._fail(
+                call,
+                tool.name,
+                OperationTimeoutError(
                     f"tool {tool.name!r} exceeded {tool.timeout_seconds}s timeout"
                 ),
-                call_id=call.call_id,
             )
         except ChaosError as exc:
-            return ToolResult(ok=False, tool=tool.name, error=exc, call_id=call.call_id)
+            return self._fail(call, tool.name, exc)
         except Exception as exc:  # noqa: BLE001 — a rogue tool must never crash the router
-            return ToolResult(
-                ok=False,
-                tool=tool.name,
-                error=ExecutionError(f"tool execute() raised: {exc}"),
-                call_id=call.call_id,
-            )
+            return self._fail(call, tool.name, ExecutionError(f"tool execute() raised: {exc}"))
 
         if not isinstance(result, ToolResult):
-            return ToolResult(
-                ok=False,
-                tool=tool.name,
-                error=ExecutionError(
+            return self._fail(
+                call,
+                tool.name,
+                ExecutionError(
                     f"tool {tool.name!r} returned {type(result).__name__}, expected ToolResult"
                 ),
-                call_id=call.call_id,
             )
+        self._publish("tool.execution.finished", call, ok=result.ok)
         return result
 
 
