@@ -521,11 +521,13 @@
   chưa có registry tool cụ thể nào (tool đầu tiên là M6 browser/M7 OS), permission vẫn là
   placeholder bảo thủ SAFE-only (PermissionEngine thật là M4 — khi đó thay `_is_permitted` mà
   không đổi chữ ký `dispatch()`), chưa có CONFIRM flow tương tác với user thật.
-- Repo public trên GitHub (`https://github.com/thanh577/CHAOS-_AGENTS`), branch `main` — đã push
-  đến hết M1 (`e8783c6`); các commit M2 (`0fd263b`/`fa77611`/`02cba96`) và M3 (`23ba3d1`/
-  `83dbe91`/commit T3.3 cuối) đang ở cloud clone (`/home/claude/chaos`), CHƯA push vì cloud
-  container bị chặn push trực tiếp lên repo này (org egress-proxy policy) — cần chuyển bundle
-  sang máy thật của user rồi push từ đó bằng PAT (`repo`+`workflow` scope) khi có lệnh.
+- Repo public trên GitHub (`https://github.com/thanh577/CHAOS-_AGENTS`), branch `main` — đã
+  push đến hết Milestone 3 (`946b2e3`), bao gồm M2 (`0fd263b`/`fa77611`/`02cba96`) và M3
+  (`23ba3d1`/`83dbe91`/`946b2e3`). Lưu ý: cloud container bị chặn push trực tiếp lên repo này
+  (org egress-proxy policy) — quy trình chuẩn từ nay là commit ở cloud clone
+  (`/home/claude/chaos`) → git bundle → SendUserFile → device_commit_files vào máy thật của
+  user → fetch+merge --ff-only trên máy → verify test → push bằng PAT (`repo`+`workflow`
+  scope) từ máy thật.
 - T0.2 không phát hiện mâu thuẫn spec: `CONTRACTS.md`/`ARCHITECTURE.md` đủ rõ để định nghĩa shape.
 
 ## Do Not Repeat
