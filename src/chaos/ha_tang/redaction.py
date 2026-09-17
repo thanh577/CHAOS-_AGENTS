@@ -8,7 +8,7 @@ can use it without import cycles. Secret holders such as
 """
 
 import re
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 REDACTED = "***"
@@ -64,10 +64,25 @@ def redact_text(text: str) -> str:
     Covers ``Authorization: Bearer <token>``-style headers and
     ``key=value``/``key: value`` pairs. Conservative: unknown shapes
     pass through, so structured redaction (:func:`redact`) is still
-    required for mappings.
+    required for mappings — and :func:`scrub_known_secrets` for values
+    the caller already knows are secret.
     """
     redacted = _BEARER_RE.sub(lambda match: f"{match.group(1)} {REDACTED}", text)
     return _KEY_VALUE_RE.sub(lambda match: f"{match.group(1)}{match.group(2)}{REDACTED}", redacted)
+
+
+def scrub_known_secrets(text: str, secrets: Iterable[str]) -> str:
+    """Replace exact known-secret values with ``***``.
+
+    Last line of defense for error strings: pattern redaction cannot
+    recognize an arbitrary credential, but the holder (e.g. settings)
+    knows its own secrets. Longest first, empties skipped,
+    deterministic. Values stay in memory only — never logged.
+    """
+    redacted = text
+    for secret in sorted({s for s in secrets if s}, key=len, reverse=True):
+        redacted = redacted.replace(secret, REDACTED)
+    return redacted
 
 
 def redact_mapping(data: Mapping[str, Any]) -> dict[str, Any]:
@@ -117,4 +132,12 @@ def error_details(exc: BaseException) -> dict[str, Any]:
     return redact_mapping(details)
 
 
-__all__ = ["REDACTED", "error_details", "format_error", "redact", "redact_mapping", "redact_text"]
+__all__ = [
+    "REDACTED",
+    "error_details",
+    "format_error",
+    "redact",
+    "redact_mapping",
+    "redact_text",
+    "scrub_known_secrets",
+]

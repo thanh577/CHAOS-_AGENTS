@@ -56,6 +56,12 @@ FORBIDDEN = [
     r"\bdotenv\b",
 ]
 
+# T0.7 exception: application.py assembles the configured database path with
+# pathlib and prepares the storage directory (mkdir). Both stay inside the
+# operator-configured storage location — reviewed, in-scope. Every other
+# module keeps the full ban.
+EXEMPT = {"application.py": {r"\bpathlib\b"}}
+
 
 def _code_only(path: Path) -> str:
     """Source minus strings/comments, so prose can't trip the scan."""
@@ -88,7 +94,10 @@ def test_no_network_shell_filesystem_or_dotenv():
     hits = []
     for path in MODULE_FILES:
         code = _code_only(path)
+        allowed = EXEMPT.get(path.name, set())
         for pattern in FORBIDDEN:
+            if pattern in allowed:
+                continue
             if re.search(pattern, code):
                 hits.append(f"{path.name}: {pattern}")
     assert hits == []

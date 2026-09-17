@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.6 spec-compliance DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
-- **Last Completed Task:** T0.6 Spec Compliance Review (SQLAlchemy + migrations, Case B)
+- **Current Task:** T0.7 DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
+- **Last Completed Task:** T0.7 — Persistence/Application Lifecycle Integration
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.7/M1+.
-- **Last Updated:** 2026-09-17 (T0.6 compliance complete)
+- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.8/M1+.
+- **Last Updated:** 2026-09-17 (T0.7 complete)
 
 ## Completed Tasks
 
@@ -130,6 +130,11 @@
 - T0.6 compliance: `pyproject.toml` + `uv.lock` (SQLAlchemy), `sqlite_store.py` (Core backend +
   migrations), `test_persistence_{sqlite (text/mappings), boundaries (allow sqlalchemy Core-only),
   migrations (mới)}`. Models/ABC không đổi.
+- T0.7: `src/chaos/ha_tang/{application.py (context+persistence wiring/startup-shutdown/events),
+  logging.py (bỏ data_dir khỏi safe_summary), redaction.py (+scrub_known_secrets)}`,
+  `tests/test_persistence_integration.py` (mới, 15 tests),
+  `tests/test_{bootstrap, bootstrap_boundaries (pathlib-exempt application.py),
+  runtime_orchestrator, redaction}` (adapt).
 
 ## Tests
 
@@ -169,6 +174,10 @@
 - T0.6 compliance: `uv run pytest -q` → **199 passed** (194 adapt + 5 migration mới);
   `uvx ruff check .` → pass (I001/RUF022 auto-fix + SIM117); `uvx ruff format --check .` → pass;
   `uv run chaos` → exit 0; `uv sync --frozen` → consistent.
+- T0.7: `uv run pytest -q` → **214 passed** (199 cũ adapt + 15 mới: context/startup/shutdown/failure/
+  db-lifecycle/logging/isolation); `uvx ruff check .` → pass (RUF022/I001 auto-fix + BLE001 noqa
+  có lý do cho unwind-handler); `uvx ruff format --check .` → 86 files pass;
+  `uv run chaos` env sạch → exit 0 (tạo `./data/chaos.db` đúng kỳ vọng, đã xóa sau verify).
 
 ## Verification
 
@@ -196,6 +205,10 @@
   không `.db` artifact trong repo (tests dùng `tmp_path`, `.gitignore` đã chặn `*.db`).
 - T0.6 compliance: secret scan → 0 match; forbidden-dep scan (trừ sqlalchemy theo spec) → 0 match;
   AST scan (stdlib/`chaos`/`sqlalchemy`) + Core-only (`sqlalchemy.orm` cấm) → pass; `.env` không tồn tại.
+- T0.7: diff review → 3 src sửa + 4 test adapt + 1 test mới (`pyproject.toml`/`uv.lock` untouched →
+  dependency delta 0); secret scan → 0 match; forbidden-dep scan → 0 match;
+  boundary scan (pathlib-exempt đúng `application.py`) → pass; `.env` không tồn tại;
+  `./data/chaos.db` tạo bởi verify đã xóa, tree clean (`.gitignore` chặn `*.db`).
 
 ## Important Technical Decisions
 
@@ -241,6 +254,11 @@
   models (không duplicate semantics); explicit BEGIN chống self-commit của SAVEPOINT-first tx;
   engine chỉ gán sau migrate thành công (failed initialize → is_open False); column-evolution
   (ALTER TABLE) để dành migration v2+; `uv.lock` commit theo convention app.
+- T0.7: Application sở hữu Runtime + Persistence như siblings (Runtime không sở hữu DB);
+  persistence KHÔNG implement Service (hook-order không diễn đạt unwind — documented);
+  DB = `data_dir/chaos.db`, không config field mới; mkdir + OSError→ConfigurationError (không log path);
+  stop-fail không close (runtime còn sống); `persistence.created` cố tình không phát;
+  `scrub_known_secrets` đóng leak secret-trong-exception-message.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -275,6 +293,13 @@
 
 ## Spec References Used
 
+- T0.7: `AGENTS.md`, `CHAOS_STATE.md`, `README.md`, `docs/README.md`, `docs/spec/ARCHITECTURE.md`,
+  `docs/spec/CONTRACTS.md`, `docs/spec/DATA_MODEL.md`, `docs/spec/SECURITY.md`, `docs/spec/TESTING.md`,
+  `docs/spec/DEFINITION_OF_DONE.md`, `docs/spec/AGENT_RULES.md` (+ nền T0.1–T0.6 giữ nguyên).
+- T0.6/T0.6-compliance: `AGENTS.md`, `docs/spec/DATA_MODEL.md`, `docs/spec/ARCHITECTURE.md`,
+  `docs/spec/AGENT_RULES.md` (+ nền T0.1–T0.5 giữ nguyên).
+- T0.5/T0.5-gap-audit: `AGENTS.md`, `docs/spec/ARCHITECTURE.md`, `docs/spec/CONTRACTS.md`,
+  `docs/spec/SECURITY.md` (+ nền T0.1–T0.4 giữ nguyên).
 - T0.4: `AGENTS.md`, `README.md`, `docs/README.md`, `docs/spec/ARCHITECTURE.md`, `docs/spec/CONTRACTS.md`,
   `docs/spec/SECURITY.md`, `docs/spec/TESTING.md`, `docs/spec/DEFINITION_OF_DONE.md`, `docs/spec/AGENT_RULES.md`
   (+ nền T0.1–T0.3 giữ nguyên).
@@ -309,6 +334,9 @@ DoD 27/27 có evidence. Không T0.7/M1+.
 2026-09-17 — T0.6 compliance (Case B) hoàn tất: SQLAlchemy Core 2.0.54 + Migration registry,
 giữ nguyên models/ABC/API, 199 tests pass, ruff/format pass, dep delta = sqlalchemy theo spec,
 chaos exit 0, uv.lock consistent. Không T0.7/M1+.
+2026-09-17 — T0.7 hoàn tất: Application sở hữu Runtime + Persistence (siblings), frozen context
++ persistence, startup/shutdown ordering + failure unwind + persistence events + scrub_known_secrets,
+214 tests pass, ruff/format pass, dep delta 0, chaos env sạch exit 0. DoD 26/26. Không T0.8/M1+.
 
 - **T0.6 — Persistence Foundation & Data Model (2026-09-17):**
   - Spec basis: `DATA_MODEL.md` chỉ định nghĩa 9 tên bảng + SQLite/SQLAlchemy + migrations —
@@ -352,11 +380,43 @@ chaos exit 0, uv.lock consistent. Không T0.7/M1+.
   - 199 tests pass (194 cũ adapt + 5 migration mới); ruff + format pass; chaos exit 0; dep delta
     đúng policy (spec precedence). Không T0.7/M1+.
 
+- **T0.7 — Persistence/Application Lifecycle Integration (2026-09-17, sau commit 3536b49):**
+  - Ownership (trả lời §3): Application tạo (từ settings.storage) + initialize + sở hữu +
+    shutdown cả Runtime và Persistence như siblings — Runtime KHÔNG sở hữu DB (giữ Runtime tái dùng).
+    Không singleton/locator/global/hidden-dep. Không Service thứ hai: persistence KHÔNG implement
+    `Service` vì hook-order của Runtime không diễn đạt được "persistence trước, unwind khi runtime
+    fail" nếu không thêm unwind machinery (rejected — minimal change).
+  - Context: thêm field `persistence: SqliteDatabase` vào frozen `ApplicationContext`
+    (settings/logger/runtime/persistence — không god-object). `create_application` giữ signature;
+    direct constructions trong tests đã update.
+  - Config: KHÔNG field mới — `data_dir` hiện có đủ; DB = `data_dir/chaos.db` (`DATABASE_FILENAME`).
+    `create_application` mkdir parents + map OSError → `ConfigurationError` (không log path).
+  - Startup: create (wiring, chưa mở DB) → persistence.initialize → runtime.initialize →
+    runtime.start → RUNNING. Init-fail: runtime giữ CREATED. Start-fail: unwind persistence.close().
+  - Shutdown: runtime.shutdown → persistence.close → STOPPED; `finally` đảm bảo close kể cả khi
+    runtime halt fail; stop-fail KHÔNG close (runtime còn sống — không fake success).
+  - Events: `persistence.initialized` (+schema_version) / `.initialization.failed` / `.shutdown` /
+    `.shutdown.failed` qua `log_event` + per-run correlation; KHÔNG phát `persistence.created`
+    (wiring thuần, tránh noise — documented). Payload safe, không path/secret.
+  - Secret-safety: `safe_summary` bỏ key `data_dir` (§11 strict); `redaction.scrub_known_secrets`
+    mới + dùng trong mọi failure payload (bắt leak thật: secret trong exception message).
+  - 214 tests (199 cũ adapt + 15 mới); ruff + format pass; chaos env sạch exit 0; dep delta 0.
+  - AC T0.7: DoD 26/26 đạt (xem T0.7 report). Không workflow M1+, không T0.8.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.7
+- Session: Milestone 0 — T0.7 Persistence/Application Lifecycle Integration
+- Completed: T0.7 (ownership siblings, context+persistence, config data_dir/chaos.db, startup/shutdown ordering + unwind, 4 persistence events, scrub_known_secrets; 15 tests, 214 pass, ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 3 src sửa + 4 test adapt + 1 test mới (xem Changed Files); pyproject/uv.lock không đổi
+- Tests: pytest 214 passed (199 cũ adapt + 15 mới); 1 leak secret-thật bắt và fix trong lúc test
+- Decisions: App owns Runtime+Persistence, không Service thứ hai, không field config mới, mkdir + no-path-log, stop-fail không close, bỏ data_dir khỏi summary, không phát persistence.created
+- Blockers: không — DoD 26/26 có evidence
+- Next: chờ lệnh milestone tiếp theo; KHÔNG T0.8/M1+
 
 ## 2026-09-17 T0.6 compliance
 - Session: M0 T0.6 Spec Compliance Review — Case B (sau 2402f6a, không rollback)

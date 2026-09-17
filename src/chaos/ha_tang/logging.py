@@ -91,14 +91,14 @@ def safe_summary(settings: ChaosSettings) -> dict[str, Any]:
     """Startup-safe configuration summary with secrets excluded.
 
     Presence of credentials is reported as booleans only — values,
-    especially ``api_key``, never appear here.
+    especially ``api_key``, never appear here. Filesystem locations
+    are excluded too: paths may contain sensitive segments.
     """
     return {
         "environment": settings.app.environment,
         "debug": settings.app.debug,
         "log_level": settings.logging.level,
         "request_timeout_seconds": settings.runtime.request_timeout_seconds,
-        "data_dir": settings.storage.data_dir,
         "ai_provider_configured": settings.ai.provider_name is not None,
         "ai_model_configured": settings.ai.model is not None,
         "ai_api_key_present": settings.ai.api_key is not None,

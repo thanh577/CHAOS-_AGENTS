@@ -9,7 +9,15 @@ from chaos.cau_hinh.settings import ChaosSettings
 from chaos.ha_tang.application import Application, ApplicationContext, create_application
 from chaos.ha_tang.contracts.errors import ExecutionError, OperationTimeoutError, ValidationError
 from chaos.ha_tang.logging import configure_logging
+from chaos.ha_tang.persistence.sqlite_store import SqliteDatabase
 from chaos.ha_tang.runtime import Runtime, RuntimeState, Service
+
+
+def _tmp_settings(tmp_path, extra: dict | None = None):
+    """Settings with an isolated tmp database (never ./data)."""
+    env = {"CHAOS_DATA_DIR": str(tmp_path / "data")}
+    env.update(extra or {})
+    return ChaosSettings.from_env(env)
 
 
 class RecordingService(Service):
@@ -143,18 +151,19 @@ def test_invalid_transitions_fail(steps):
             getattr(runtime, step)()
 
 
-def test_context_is_frozen_and_explicit():
-    app = create_application(ChaosSettings.defaults())
+def test_context_is_frozen_and_explicit(tmp_path):
+    app = create_application(_tmp_settings(tmp_path))
     context = app.context
     assert isinstance(context, ApplicationContext)
     assert isinstance(context.logger, logging.Logger)
     assert context.settings is not None and context.runtime is not None
+    assert context.persistence is not None
     with pytest.raises(FrozenInstanceError):
         context.settings = ChaosSettings.defaults()  # type: ignore[misc]
 
 
-def test_run_walks_full_sequence_to_exit_zero():
-    app = create_application(ChaosSettings.defaults())
+def test_run_walks_full_sequence_to_exit_zero(tmp_path):
+    app = create_application(_tmp_settings(tmp_path))
     assert app.run() == 0
     assert app.context.runtime.state is RuntimeState.STOPPED
     assert app.context.runtime.history == (
@@ -166,15 +175,16 @@ def test_run_walks_full_sequence_to_exit_zero():
     )
 
 
-def test_run_failure_never_fakes_running_and_keeps_classification():
+def test_run_failure_never_fakes_running_and_keeps_classification(tmp_path):
     secret = "s3cr3t-startup-value"
-    settings = ChaosSettings.from_env({"CHAOS_AI_API_KEY": secret})
+    settings = _tmp_settings(tmp_path, {"CHAOS_AI_API_KEY": secret})
     logger = configure_logging(settings.logging.level)
     app = Application(
         ApplicationContext(
             settings=settings,
             runtime=Runtime(services=(RecordingService("bad", fail_on="startup"),)),
             logger=logger,
+            persistence=SqliteDatabase(tmp_path / "uninit.db"),
         )
     )
 
@@ -215,8 +225,16 @@ class FlakyRuntime(Runtime):
 
 
 def _app_with_runtime(settings: ChaosSettings, runtime: Runtime):
-    logger = configure_logging(settings.logging.level)
-    app = Application(ApplicationContext(settings=settings, runtime=runtime, logger=logger))
+    wired = create_application(settings)  # production wiring: mkdir + logger + persistence
+    logger = wired.context.logger
+    app = Application(
+        ApplicationContext(
+            settings=wired.context.settings,
+            runtime=runtime,
+            logger=logger,
+            persistence=wired.context.persistence,
+        )
+    )
     records: list[logging.LogRecord] = []
 
     class _Collector(logging.Handler):
@@ -232,10 +250,8 @@ def _events(records: list[logging.LogRecord]):
     return [record.args for record in records]
 
 
-def test_run_start_failure_never_fakes_running():
-    app, records, detach = _app_with_runtime(
-        ChaosSettings.defaults(), FlakyRuntime(fail_on="start")
-    )
+def test_run_start_failure_never_fakes_running(tmp_path):
+    app, records, detach = _app_with_runtime(_tmp_settings(tmp_path), FlakyRuntime(fail_on="start"))
     try:
         with pytest.raises(OperationTimeoutError, match="start timed out"):
             app.run()
@@ -249,8 +265,8 @@ def test_run_start_failure_never_fakes_running():
     assert failed[0]["correlation_id"]
 
 
-def test_run_stop_failure_stays_running_and_logs_event():
-    app, records, detach = _app_with_runtime(ChaosSettings.defaults(), FlakyRuntime(fail_on="stop"))
+def test_run_stop_failure_stays_running_and_logs_event(tmp_path):
+    app, records, detach = _app_with_runtime(_tmp_settings(tmp_path), FlakyRuntime(fail_on="stop"))
     try:
         with pytest.raises(ExecutionError, match="stop exploded"):
             app.run()
@@ -264,9 +280,9 @@ def test_run_stop_failure_stays_running_and_logs_event():
     assert failed[0]["correlation_id"]
 
 
-def test_lifecycle_events_carry_correlation_and_redacted_payload():
+def test_lifecycle_events_carry_correlation_and_redacted_payload(tmp_path):
     secret = "s3cr3t-lifecycle-value"
-    settings = ChaosSettings.from_env({"CHAOS_AI_API_KEY": secret})
+    settings = _tmp_settings(tmp_path, {"CHAOS_AI_API_KEY": secret})
     app, records, detach = _app_with_runtime(settings, Runtime())
     try:
         assert app.run() == 0

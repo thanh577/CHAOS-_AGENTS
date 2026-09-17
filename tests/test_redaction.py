@@ -1,7 +1,13 @@
 """Redaction tests: keys, bearer text, nesting, holders, determinism."""
 
 from chaos.cau_hinh.secrets import Secret
-from chaos.ha_tang.redaction import REDACTED, redact, redact_mapping, redact_text
+from chaos.ha_tang.redaction import (
+    REDACTED,
+    redact,
+    redact_mapping,
+    redact_text,
+    scrub_known_secrets,
+)
 
 
 def test_sensitive_keys_redacted_case_insensitively():
@@ -89,3 +95,14 @@ def test_deterministic_and_non_mutating():
     first, second = redact(source), redact(source)
     assert first == second == {"api_key": "***", "nested": {"token": "***"}}
     assert source == {"api_key": "v", "nested": {"token": "t"}}
+
+
+def test_scrub_known_secrets_replaces_exact_values():
+    assert scrub_known_secrets("backend down for hunter2-abc", ["hunter2-abc"]) == (
+        "backend down for ***"
+    )
+    assert scrub_known_secrets("nothing here", ["hunter2-abc"]) == "nothing here"
+    assert scrub_known_secrets("keep hunter2-abc twice hunter2-abc", ["hunter2-abc"]) == (
+        "keep *** twice ***"
+    )
+    assert scrub_known_secrets("untouched", ["", "x"]) == "untouched"
