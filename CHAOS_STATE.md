@@ -688,11 +688,11 @@
   + `StaticPermissionEngine`/`ToolRouter` chưa wire vào `ApplicationContext` (cùng lý do M3: chưa
   có tool registry thật để cần composition).
 - Repo public trên GitHub (`https://github.com/thanh577/CHAOS-_AGENTS`), branch `main` — đã
-  push đến hết Milestone 3 (`946b2e3`). Milestone 4 (`e574476`/`ceb619c`/`b8fe652`/commit T4.4
-  cuối) đang ở cloud clone (`/home/claude/chaos`), CHƯA push — cloud container bị chặn push
-  trực tiếp lên repo này (org egress-proxy policy). Quy trình chuẩn: commit ở cloud clone → git
-  bundle → SendUserFile → device_commit_files vào máy thật của user → fetch+merge --ff-only trên
-  máy → verify test → push bằng PAT (`repo`+`workflow` scope) từ máy thật.
+  push đến hết Milestone 4 (`76ebc9e`), bao gồm M4 (`e574476`/`ceb619c`/`b8fe652`/`76ebc9e`).
+  Lưu ý: cloud container bị chặn push trực tiếp lên repo này (org egress-proxy policy) — quy
+  trình chuẩn: commit ở cloud clone (`/home/claude/chaos`) → git bundle → SendUserFile →
+  device_commit_files vào máy thật của user → fetch+merge --ff-only trên máy → verify test →
+  push bằng PAT (`repo`+`workflow` scope) từ máy thật.
 - T0.2 không phát hiện mâu thuẫn spec: `CONTRACTS.md`/`ARCHITECTURE.md` đủ rõ để định nghĩa shape.
 
 ## Do Not Repeat
