@@ -4,7 +4,11 @@ version = "0.0.1"
 description = "CHAOS — desktop AI agent (Milestone 0 Foundation)"
 readme = "README.md"
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    # AGENTS.md section 17 (DATABASE) mandates SQLAlchemy; stdlib sqlite3 is
+    # insufficient as the standing persistence backend. Core API only.
+    "SQLAlchemy>=2.0,<3",
+]
 
 [project.scripts]
 chaos = "chaos.main:main"

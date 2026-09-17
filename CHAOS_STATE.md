@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.6 DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
-- **Last Completed Task:** T0.6 — Persistence Foundation & Data Model
+- **Current Task:** T0.6 spec-compliance DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
+- **Last Completed Task:** T0.6 Spec Compliance Review (SQLAlchemy + migrations, Case B)
 - **Blocked By:** Không
 - **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.7/M1+.
-- **Last Updated:** 2026-09-17 (T0.6 complete)
+- **Last Updated:** 2026-09-17 (T0.6 compliance complete)
 
 ## Completed Tasks
 
@@ -127,6 +127,9 @@
   và `tests/test_redaction.py` (1 precision regression test).
 - T0.6: `src/chaos/ha_tang/persistence/{__init__,models,repository,sqlite_store}.py` (mới) +
   4 test files (`test_persistence_models/sqlite/security/boundaries`). Không sửa tracked files.
+- T0.6 compliance: `pyproject.toml` + `uv.lock` (SQLAlchemy), `sqlite_store.py` (Core backend +
+  migrations), `test_persistence_{sqlite (text/mappings), boundaries (allow sqlalchemy Core-only),
+  migrations (mới)}`. Models/ABC không đổi.
 
 ## Tests
 
@@ -163,6 +166,9 @@
   schema/CRUD/FK/tx/rollback/cleanup/append-only; injection/secret-safety; boundaries).
 - Lint/format T0.6: `uvx ruff check .` → pass (auto-fix sort + PEP 695 generics sửa tay + DTZ001 noqa
   có lý do + SIM117 auto-fix); `uvx ruff format --check .` → 84 files pass; `uv run chaos` → exit 0.
+- T0.6 compliance: `uv run pytest -q` → **199 passed** (194 adapt + 5 migration mới);
+  `uvx ruff check .` → pass (I001/RUF022 auto-fix + SIM117); `uvx ruff format --check .` → pass;
+  `uv run chaos` → exit 0; `uv sync --frozen` → consistent.
 
 ## Verification
 
@@ -188,6 +194,8 @@
   dependency delta 0); secret scan → 0 match; forbidden-dep scan (orm/db-client/telemetry/…) → 0 match;
   AST import scan (stdlib/`chaos` only) + sqlite-là-driver-duy-nhất → pass; `.env` không tồn tại;
   không `.db` artifact trong repo (tests dùng `tmp_path`, `.gitignore` đã chặn `*.db`).
+- T0.6 compliance: secret scan → 0 match; forbidden-dep scan (trừ sqlalchemy theo spec) → 0 match;
+  AST scan (stdlib/`chaos`/`sqlalchemy`) + Core-only (`sqlalchemy.orm` cấm) → pass; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -229,6 +237,10 @@
   (MemoryStore async để M8 quyết bridge); `pathlib` chỉ mang path đã cấu hình (fs writer duy nhất
   là `sqlite3.connect` — boundary test ghi nhận ngoại lệ này); `AuditEvent` append-only ở repo level;
   settings giữ `id` uniform + `key` UNIQUE; `schema_version` thay migration framework.
+- T0.6 compliance: Core-only thay ORM (không leak Session/Engine); Table metadata tách khỏi domain
+  models (không duplicate semantics); explicit BEGIN chống self-commit của SAVEPOINT-first tx;
+  engine chỉ gán sau migrate thành công (failed initialize → is_open False); column-evolution
+  (ALTER TABLE) để dành migration v2+; `uv.lock` commit theo convention app.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -294,6 +306,9 @@ IMPLEMENTED 3 gaps (failure-path tests, lifecycle events + per-run context, reda
 2026-09-17 — T0.6 hoàn tất: 9 models + generic Repository + sqlite stdlib (schema_version 1,
 SAVEPOINT tx, append-only audit), 194 tests pass, ruff/format pass, dep delta 0, chaos exit 0.
 DoD 27/27 có evidence. Không T0.7/M1+.
+2026-09-17 — T0.6 compliance (Case B) hoàn tất: SQLAlchemy Core 2.0.54 + Migration registry,
+giữ nguyên models/ABC/API, 199 tests pass, ruff/format pass, dep delta = sqlalchemy theo spec,
+chaos exit 0, uv.lock consistent. Không T0.7/M1+.
 
 - **T0.6 — Persistence Foundation & Data Model (2026-09-17):**
   - Spec basis: `DATA_MODEL.md` chỉ định nghĩa 9 tên bảng + SQLite/SQLAlchemy + migrations —
@@ -315,11 +330,43 @@ DoD 27/27 có evidence. Không T0.7/M1+.
   - 54 tests mới (tổng 194 pass); ruff + format pass; chaos exit 0. Dependency delta 0.
   - AC T0.6: DoD 27/27 đạt (xem T0.6 report). Không workflow M1+, không T0.7.
 
+- **T0.6 Spec Compliance Review — Case B (2026-09-17, sau commit 2402f6a, KHÔNG rollback):**
+  - Phân loại: SQLAlchemy = MANDATORY (AGENTS.md §17 "Dùng: SQLAlchemy" — Architecture rule,
+    outrank task order; DATA_MODEL.md "SQLite + SQLAlchemy initially"); Migrations = MANDATORY
+    (DATA_MODEL.md "Use migrations", AGENTS.md §17 "migration strategy" + "Không thay đổi schema
+    tùy tiện mà không migration"). Không có chữ "recommended/optional" ở đâu → Case B.
+  - KEEP: 9 domain models, `Repository[T]` ABC, public API backend (`SqliteDatabase`,
+    `SqliteRepository`, `TABLES`, `repositories()`, errors mapping, savepoint tx semantics).
+  - REPLACE internals: stdlib `sqlite3` → SQLAlchemy Core 2.0.54 (Table metadata + insert/select/
+    update/delete constructs, engine ownership, `begin_nested` savepoints; KHÔNG ORM —
+    `sqlalchemy.orm` bị boundary test cấm; domain models không chuyển sang ORM).
+  - ADAPT: `Migration` registry + `migrate()` (ordered, idempotent, version marker, failure giữ
+    version cũ); tests dùng internals cũ (row_factory/raw-SQL-`?`) chuyển sang `text()`/mappings;
+    boundary tests cho phép đúng `sqlalchemy` (Core-only).
+  - BUG THẬT phát hiện trong lúc chuyển backend: pysqlite legacy chỉ BEGIN ngầm trước DML nên
+    transaction mở bằng SAVEPOINT tự commit ở RELEASE → fix bằng explicit `BEGIN` ở outer boundary
+    (giữ DEFERRED semantics) + tests rollback/nested vẫn xanh; FK thiếu trong Table defs → thêm
+    `ForeignKey` (đúng spec "foreign keys").
+  - Dependency: `SQLAlchemy>=2.0,<3` (runtime, MIT license verified, 2.0.x active, py3.12 OK) +
+    transitive greenlet/typing-extensions trong uv.lock. KHÔNG Alembic/Pydantic.
+  - 199 tests pass (194 cũ adapt + 5 migration mới); ruff + format pass; chaos exit 0; dep delta
+    đúng policy (spec precedence). Không T0.7/M1+.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.6 compliance
+- Session: M0 T0.6 Spec Compliance Review — Case B (sau 2402f6a, không rollback)
+- Completed: phân loại MANDATORY có evidence; SQLAlchemy Core backend + Migration registry giữ API; 199 tests pass
+- Changed: pyproject/uv.lock + sqlite_store rewrite-internals + 2 tests adapt + 1 test migration mới (xem Changed Files)
+- Tests: pytest 199 passed; ruff + format pass; chaos exit 0; uv sync --frozen ok
+- Decisions: Core-only (cấm ORM), explicit BEGIN, engine-gán-sau-migrate, ALTER để v2+, Alembic không cần
+- Bugs found & fixed: SAVEPOINT-first self-commit; missing ForeignKey; engine gán trước migrate
+- Blockers: không
+- Next: chờ lệnh milestone tiếp theo; KHÔNG T0.7/M1+
 
 ## 2026-09-17 T0.6
 - Session: Milestone 0 — T0.6 Persistence Foundation & Data Model

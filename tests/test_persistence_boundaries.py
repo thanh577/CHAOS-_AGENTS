@@ -24,6 +24,8 @@ MODULE_FILES = [
     Path(chaos.ha_tang.persistence.sqlite_store.__file__),
 ]
 
+# NOTE: `pathlib` is allowed in these modules — Path carries only the configured
+# database location; the filesystem writer is the SQLAlchemy engine on that path.
 FORBIDDEN = [
     r"\bsubprocess\b",
     r"\bsocket\b",
@@ -36,15 +38,11 @@ FORBIDDEN = [
     r"\bos\.exec\w*\b",
     r"\bos\.spawn\w*\b",
     r"\bshutil\b",
-    # NOTE: `pathlib` is allowed here — Path only carries the configured
-    # database location; the sole filesystem writer is sqlite3.connect
-    # on that explicit path (reviewed, in-scope for T0.6).
     r"\bopen\s*\(",
     r"\b__import__\b",
     r"\beval\s*\(",
     r"\bexec\s*\(",
     r"\bctypes\b",
-    r"\bsqlalchemy\b",
     r"\balembic\b",
     r"\bpydantic\b",
     r"\bdotenv\b",
@@ -54,6 +52,7 @@ FORBIDDEN = [
     r"\banthropic\b",
     r"\brequests\b",
     r"\bhttpx\b",
+    r"\bsqlalchemy\.orm\b",
 ]
 
 
@@ -63,7 +62,9 @@ def _code_only(path: Path) -> str:
     return "\n".join(kept)
 
 
-def test_imports_are_stdlib_or_chaos_only():
+def test_imports_are_stdlib_chaos_or_sqlalchemy_only():
+    # SQLAlchemy is the single mandated third-party backend (AGENTS.md section 17);
+    # everything else stays stdlib-or-chaos.
     stdlib = set(sys.stdlib_module_names)
     violations = []
     for path in MODULE_FILES:
@@ -78,7 +79,7 @@ def test_imports_are_stdlib_or_chaos_only():
             else:
                 continue
             for root in roots:
-                if root not in stdlib and root != "chaos":
+                if root not in stdlib and root not in ("chaos", "sqlalchemy"):
                     violations.append(f"{path.name}: {root}")
     assert violations == []
 
@@ -93,12 +94,13 @@ def test_no_forbidden_subsystem_primitives():
     assert hits == []
 
 
-def test_sqlite_is_the_only_database_driver():
+def test_sqlalchemy_core_is_the_backend_driver():
     import chaos.ha_tang.persistence.sqlite_store as store
 
     source = Path(store.__file__).read_text(encoding="utf-8")
-    assert "import sqlite3" in source
-    assert "sqlalchemy" not in source.lower()
+    assert "from sqlalchemy import" in source  # Core backend per AGENTS.md section 17
+    assert "sqlalchemy.orm" not in source  # no ORM leak into the backend, let alone domain
+    assert "import sqlite3" in source  # only for the FK-pragma connect listener
 
 
 def test_no_secret_shaped_literals_in_source():

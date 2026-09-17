@@ -1,7 +1,5 @@
 """SQLite backend tests: schema, CRUD, transactions, cleanup (isolated tmp DBs)."""
 
-import sqlite3
-
 import pytest
 
 from chaos.ha_tang.contracts.errors import ExecutionError, ValidationError
@@ -183,15 +181,34 @@ def test_nested_transaction_inner_rollback_keeps_outer(database, repos):
 
 
 def test_transaction_commits_across_repositories(database, repos):
+    from sqlalchemy import text
+
     with database.transaction() as connection:
         connection.execute(
-            "INSERT INTO sessions (id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            ("txs", "t", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+            text(
+                "INSERT INTO sessions (id, title, created_at, updated_at) "
+                "VALUES (:id, :title, :created, :updated)"
+            ),
+            {
+                "id": "txs",
+                "title": "t",
+                "created": "2026-01-01T00:00:00+00:00",
+                "updated": "2026-01-01T00:00:00+00:00",
+            },
         )
         connection.execute(
-            "INSERT INTO messages (id, session_id, role, content, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            ("txm", "txs", "user", "hi", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:00+00:00"),
+            text(
+                "INSERT INTO messages (id, session_id, role, content, created_at, updated_at) "
+                "VALUES (:id, :session, :role, :content, :created, :updated)"
+            ),
+            {
+                "id": "txm",
+                "session": "txs",
+                "role": "user",
+                "content": "hi",
+                "created": "2026-01-01T00:00:00+00:00",
+                "updated": "2026-01-01T00:00:00+00:00",
+            },
         )
     assert repos["messages"].get("txm").session_id == "txs"
 
@@ -223,7 +240,11 @@ def test_close_breaks_operations(database, repos):
         repos["sessions"].list()
 
 
-def test_raw_connection_uses_row_factory_and_foreign_keys(database):
+def test_engine_connection_uses_mappings_and_foreign_keys(database):
+    from sqlalchemy import text
+
     with database.transaction() as connection:
-        assert isinstance(connection.execute("SELECT 1").fetchone(), sqlite3.Row)
-        assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        assert connection.execute(text("SELECT 1")).fetchone()[0] == 1
+        assert connection.execute(text("PRAGMA foreign_keys")).fetchone()[0] == 1
+        empty = connection.execute(text("SELECT * FROM sessions")).mappings().fetchall()
+        assert empty == []
