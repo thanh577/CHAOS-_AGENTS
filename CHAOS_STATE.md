@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 2)
 - **Current Milestone:** 2 — Event Bus
-- **Current Task:** T2.2 DONE — tiếp T2.3 (boundary tests + Integration/DoD, chốt M2)
-- **Last Completed Task:** T2.2 — Audit Persistence Sink (7 tests, 317 pass)
+- **Current Task:** M2 DONE — T2.3 complete (chờ lệnh milestone tiếp theo)
+- **Last Completed Task:** M2 — Event Bus (T2.1–T2.3)
 - **Blocked By:** Không
-- **Next Action:** Triển khai T2.3 (boundary tests + full verify + state + commit cuối M2).
-- **Last Updated:** 2026-09-17 (T2.2 complete)
+- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không M3.
+- **Last Updated:** 2026-09-17 (M2 complete)
 
 ## Milestone 2 Plan — Event Bus (ARCHITECTURE.md layer 9, TASKS.md #2)
 
@@ -211,6 +211,7 @@
   Không sửa file nào khác; `pyproject.toml`/`uv.lock` untouched.
 - T2.2: `src/chaos/ha_tang/event_sinks.py` (mới) + `tests/test_event_sinks.py` (mới, 7 tests).
   Không sửa models/repository/sqlite_store; `pyproject.toml`/`uv.lock` untouched.
+- T2.3: `tests/test_event_bus_boundaries.py` (mới, 4 tests). Không sửa src nào.
 
 ## Tests
 
@@ -270,6 +271,10 @@
   redact payload trước khi ghi, id riêng mỗi row, wire qua wildcard trên EventBus thật, lỗi
   sink bị EventBus cô lập, gọi sink trực tiếp thì lỗi repository thật vẫn propagate);
   `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format --check .` → 97 files pass.
+- T2.3: `uv run pytest -q` → **321 passed** (317 cũ xanh + 4 mới: boundary event_bus+event_sinks
+  stdlib/chaos-only, no forbidden subsystem, no secret literal, event_bus.py độc lập
+  persistence); `uvx ruff check .` → pass; `uvx ruff format --check .` → 98 files pass;
+  `uv run chaos` env sạch → exit 0.
 
 ## Verification
 
@@ -316,6 +321,10 @@
   có sẵn, không sửa persistence) + 1 test mới (`pyproject.toml`/`uv.lock` untouched →
   dependency delta 0); secret scan → 0 match; redact-trước-khi-persist verify bằng test
   (`s3cr3t-real-value` không xuất hiện trong row đã lưu); `.env` không tồn tại.
+- T2.3: diff review → 1 test file mới, không sửa src nào (`pyproject.toml`/`uv.lock`
+  untouched → dependency delta 0); secret scan trên `event_bus.py`/`event_sinks.py`/toàn bộ
+  test M2 → 0 match; boundary scan (stdlib/chaos-only, không `bao_mat`/`cong_cu`) → pass;
+  `.env` không tồn tại; `./data/chaos.db` tạo bởi verify đã xóa.
 
 ## Important Technical Decisions
 
@@ -408,11 +417,22 @@
 ## Known Issues
 
 - `TASKS.md` chưa phân rã subtask/acceptance criteria cho M0 — T0.1 AC do agent lập, cần user xác nhận khi review.
-- Git `user.name`/`user.email` chưa cấu hình thật (baseline commit dùng author tạm) — set trước commit tiếp theo.
+- Git `user.name`/`user.email`: đã set `Thanh <thanh.nv@bbi-tek.vn>` cho local repo (commit từ
+  M1 trở đi dùng tên thật) — chỉ local, chưa set global; commit `98fd45c`–`746a947` (M0) vẫn
+  đứng tên tạm `CHAOS Agent <chaos-agent@local>`, không rewrite lịch sử (AGENTS.md §19 cấm).
 - `.venv/` tồn tại local (đúng git-ignored) — phiên sau chạy `uv sync --group dev` lại nếu thiếu.
-- Scope M1+ (AI provider, tool exec, browser, memory, voice, avatar, permission/verifier đầy đủ) cố tình chưa chạm — ghi nhận để không quên, không triển khai sớm.
-- T0.2 không phát hiện mâu thuẫn spec: `CONTRACTS.md`/`ARCHITECTURE.md` đủ rõ để định nghĩa shape;
-  các điểm thiếu (subtask breakdown, policy tables, bus semantics) thuộc milestone sau, đã ghi nhận không làm sớm.
+- Scope M2+ (tool exec M3, permission M4, verifier M5, browser M6, OS M7, memory M8, desktop UI M9,
+  voice M10-11, avatar M12-14, full agent loop M15...) cố tình chưa chạm — ghi nhận để không quên.
+- **M2 — EventBus chưa wire vào `ApplicationContext`**: `application.py` vẫn gọi `log_event`
+  trực tiếp như M0/M1, không publish qua bus. Cố tình để dành milestone có event producer thật
+  (Tool Framework M3 hoặc Permission M4) — tránh refactor call site đang test/commit ổn định
+  chỉ để "dùng cho có". Khi milestone đó cần publish sự kiện thật, đây là điểm nối.
+- **M2 — chỉ hỗ trợ wildcard toàn cục `"*"`**, không có prefix wildcard kiểu `tool.*`. Thêm khi
+  có consumer thật cần lọc theo namespace (không đoán trước, tránh over-engineering).
+- Repo public trên GitHub (`https://github.com/thanh577/CHAOS-_AGENTS`), branch `main` — đã push
+  đến hết M1 (`e8783c6`); nhớ push các commit M2 (`5efa2fa`, `e0ff076`, và commit T2.3 cuối) khi
+  có credential.
+- T0.2 không phát hiện mâu thuẫn spec: `CONTRACTS.md`/`ARCHITECTURE.md` đủ rõ để định nghĩa shape.
 
 ## Do Not Repeat
 
@@ -602,11 +622,38 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - ruff + format pass; chaos exit 0. Dependency delta 0.
   - AC T2.2: đúng scope, chưa wire vào ApplicationContext (để dành milestone có producer thật).
 
+- **T2.3 — Boundary & Integration/DoD, chốt Milestone 2 (2026-09-17, sau commit e0ff076):**
+  - `tests/test_event_bus_boundaries.py` (theo đúng mẫu `test_brain_boundaries.py`): imports
+    stdlib/chaos-only cho `event_bus.py` + `event_sinks.py`; không đụng `bao_mat`/`cong_cu`/SDK/
+    ORM literal; không secret-shaped literal; thêm 1 test riêng xác nhận `event_bus.py` (transport)
+    không import `persistence` — chỉ `event_sinks.py` được biết về persistence layer.
+  - Full verify: 321 tests pass (317 cũ xanh + 4 boundary mới); `ruff check`/`format --check` pass;
+    `uv run chaos` env sạch exit 0; secret scan trên toàn bộ file M2 → 0 match; `pyproject.toml`/
+    `uv.lock` untouched suốt M2 → dependency delta 0; `./data/chaos.db` verify đã xóa.
+  - AC M2 (Milestone 2 Plan): EventBus publish/subscribe + subscriber isolation (T2.1) ✓, audit
+    sink nối vào `audit_events` có sẵn + redact trước khi persist (T2.2) ✓, boundary tests +
+    full verify (T2.3) ✓. Không wire ApplicationContext, không wildcard prefix, không async
+    subscriber, không event replay API mới — đúng như Milestone 2 Plan đã ghi trước khi code.
+    Không M3.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T2.3 (chốt M2)
+- Session: Milestone 2 — T2.3 Boundary tests + Integration/DoD
+- Completed: T2.3 (`test_event_bus_boundaries.py`: stdlib/chaos-only, no forbidden subsystem,
+  no secret literal, event_bus độc lập persistence; full verify 321 tests pass, ruff/format
+  pass, chaos exit 0, dep delta 0). Milestone 2 (Event Bus) DONE.
+- Changed: 1 test file mới (xem Changed Files); không sửa src nào ở T2.3
+- Tests: pytest 321 passed (317 cũ xanh + 4 mới); pass ngay lần đầu, 1 sửa nhỏ do bài test tự
+  viết sai (dùng read_text thay vì _code_only nên "persistence" trong docstring bị tính nhầm)
+- Decisions: EventBus (transport) và AuditEventSink (persistence-aware) tách file, boundary
+  test ép event_bus.py không được biết đến persistence
+- Blockers: không — DoD Milestone 2 có evidence đầy đủ
+- Next: chờ lệnh milestone tiếp theo (M3 Tool Framework theo TASKS.md); KHÔNG tự sang M3
 
 ## 2026-09-17 T2.2
 - Session: Milestone 2 — T2.2 Audit Persistence Sink
