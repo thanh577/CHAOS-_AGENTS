@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 0)
 - **Current Milestone:** 0 — Foundation
-- **Current Task:** T0.5 DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
-- **Last Completed Task:** T0.5 — Application Runtime Orchestration Foundation
+- **Current Task:** T0.5 gap-audit DONE — Milestone 0 COMPLETE (chờ lệnh milestone tiếp theo)
+- **Last Completed Task:** T0.5 gap verification — Application Runtime Orchestration Foundation
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone.
-- **Last Updated:** 2026-09-17 (T0.5 complete)
+- **Next Action:** Chờ lệnh milestone tiếp theo. Không tự chuyển milestone. Không T0.6/M1+.
+- **Last Updated:** 2026-09-17 (T0.5 gap-audit complete)
 
 ## Completed Tasks
 
@@ -86,6 +86,24 @@
   - 19 tests mới (tổng 136 pass); ruff + format pass; `uv run chaos` exit 0. 0 dependency mới.
   - Không AI/executor/DB/GUI/voice/avatar, không execution loop, không vượt scope M0.
 
+- **T0.5 gap-audit — Completion Gap Verification (2026-09-17, sau commit a38b6d2, KHÔNG rollback):**
+  - VERIFIED EXISTING (code/test evidence, không suy luận): initialize/start/stop/shutdown failure
+    semantics ở runtime level; ownership Application→Runtime→Services; context isolation T0.4
+    nguyên vẹn; lifecycle deterministic/history/no-restart/idempotency; run() happy-path +
+    init-failure path; boundaries stdlib-only; T0.1–T0.4 xanh.
+  - IMPLEMENTED DURING GAP AUDIT (3 gaps thật, minimal additive, không refactor style):
+    1. run() start-failure và stop-failure có behavior nhưng 0 test evidence → thêm 2 tests
+       (state INITIALIZED/RUNNING, classification giữ, event + correlation).
+    2. run() chỉ log free-text, không phát lifecycle event có cấu trúc → chuyển sang `log_event`
+       (`application.started/stopped/start.failed/stop.failed`) + per-run `TraceContext`.
+       Cố tình KHÔNG phát created/initialized/stopping riêng (trùng history, tránh noise).
+    3. BUG THẬT do audit phát hiện: `_is_sensitive_key` substring-match nuốt cả flag
+       `ai_api_key_present`/`mask_secrets_in_logs` (boolean → `***`, phá hợp đồng safe_summary)
+       → đổi sang exact/endswith stems + regression test (`*_present`, `token_count`,
+       `secretary`, `auth`-block an toàn; `x-api-key`/`my_token` vẫn redact).
+  - Sau audit: 140 tests pass; ruff + format pass; `uv run chaos` env sạch exit 0
+    (events có cùng correlation_id). 0 dependency mới. Không T0.6/M1+.
+
 ## Changed Files
 
 - T0.1 (commit 98fd45c, 41 files): `.gitignore`, `.env.example`, `.python-version`, `pyproject.toml`, `uv.lock`,
@@ -104,6 +122,9 @@
   6 test files (`test_error_model/redaction/trace_context/structured_logging/events_foundation/observability_boundaries`).
 - T0.5: `src/chaos/ha_tang/{runtime,application}.py` (sửa: Service hooks, shutdown, frozen context,
   failure classification) + `tests/test_runtime_orchestrator.py` (mới, 19 tests).
+- T0.5 gap-audit: `src/chaos/ha_tang/{application.py (log_event + per-run context), redaction.py
+  (exact/endswith key match)}` + bổ sung `tests/test_runtime_orchestrator.py` (3 failure/event tests)
+  và `tests/test_redaction.py` (1 precision regression test).
 
 ## Tests
 
@@ -134,6 +155,8 @@
   shutdown paths, idempotency, no-restart, invalid transitions, frozen context, run failure classification).
 - Lint/format T0.5: `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format --check .` → 74 files pass;
   `uv run chaos` → exit 0 (không đổi behavior entrypoint).
+- T0.5 gap-audit: `uv run pytest -q` → **140 passed** (136 cũ + 4 mới); `uvx ruff check .` → pass;
+  `uvx ruff format --check .` → pass (1 file reformat); `uv run chaos` env sạch → exit 0.
 
 ## Verification
 
@@ -152,6 +175,9 @@
 - T0.5: diff review → 2 files sửa + 1 test mới (không phá T0.1–T0.4: `Runtime()` không args
   và `run()` history giữ nguyên shape); `pyproject.toml`/`uv.lock` untouched → 0 dep mới;
   secret scan → 0 match; forbidden-dep scan → 0 match; `.env` không tồn tại.
+- T0.5 gap-audit: diff review → 2 files sửa + 2 test files bổ sung (không phá T0.1–T0.5);
+  `pyproject.toml`/`uv.lock` untouched → dependency delta 0; secret scan → 0 match;
+  forbidden-subsystem scan (sdk/db/ui/network/sqlite/…) → 0 match; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -186,6 +212,9 @@
 - T0.5: hooks-before-record (fail không để lại state mơ hồ); `Service` zero-default, sync,
   stdlib-only; context frozen nhưng `Runtime` mutable có chủ đích (state machine);
   suy luận phần lệnh thiếu: failure → safe-log + re-raise (không nuốt lỗi, đúng AGENTS.md).
+- T0.5 gap-audit: per-run `TraceContext` trong `run()` (reset khi exit, isolation giữ nguyên);
+  `log_event` tái dùng thay vì log text mới; redaction exact/endswith (bare `auth` cố tình
+  không phải stem để block có cấu trúc được recurse); không tạo recovery/retry framework.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -245,12 +274,24 @@ AC 20/20. Dừng ở M0, chờ lệnh T0.5.
 2026-09-17 — T0.5 hoàn tất (lệnh bị cắt ngang, làm theo mục 1–5 + quy trình chuẩn):
 Service hooks + shutdown/idempotency/no-restart + frozen context + failure classification,
 136 tests pass, ruff/format pass, 0 dep mới. Milestone 0 xong phần orchestration.
+2026-09-17 — T0.5 gap-audit hoàn tất (không rollback a38b6d2): VERIFIED phần lớn yêu cầu;
+IMPLEMENTED 3 gaps (failure-path tests, lifecycle events + per-run context, redaction precision bug);
+140 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD 21/21 có evidence.
 
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T0.5 gap-audit
+- Session: M0 T0.5 Completion Gap Verification (sau a38b6d2, không rollback)
+- Completed: audit failure/ownership/logging/events/context/boundary; 3 gaps implemented (2 failure-path tests + structured lifecycle events + redaction precision fix); 140 tests pass
+- Changed: 2 src sửa + 2 test bổ sung (xem Changed Files); pyproject/uv.lock không đổi
+- Tests: pytest 140 passed; ruff + format pass; chaos env sạch exit 0
+- Decisions: VERIFIED vs IMPLEMENTED phân biệt rõ; không phát event cho mọi transition; bare auth không phải stem
+- Blockers: không — DoD 21/21 có evidence
+- Next: chờ lệnh milestone tiếp theo; KHÔNG T0.6/M1+
 
 ## 2026-09-17 T0.5
 - Session: Milestone 0 — T0.5 Application Runtime Orchestration Foundation

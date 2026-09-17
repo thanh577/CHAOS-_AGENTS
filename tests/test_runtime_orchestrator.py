@@ -6,8 +6,9 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from chaos.cau_hinh.settings import ChaosSettings
-from chaos.ha_tang.application import ApplicationContext, create_application
-from chaos.ha_tang.contracts.errors import ExecutionError, ValidationError
+from chaos.ha_tang.application import Application, ApplicationContext, create_application
+from chaos.ha_tang.contracts.errors import ExecutionError, OperationTimeoutError, ValidationError
+from chaos.ha_tang.logging import configure_logging
 from chaos.ha_tang.runtime import Runtime, RuntimeState, Service
 
 
@@ -166,9 +167,6 @@ def test_run_walks_full_sequence_to_exit_zero():
 
 
 def test_run_failure_never_fakes_running_and_keeps_classification():
-    from chaos.ha_tang.application import Application, ApplicationContext
-    from chaos.ha_tang.logging import configure_logging
-
     secret = "s3cr3t-startup-value"
     settings = ChaosSettings.from_env({"CHAOS_AI_API_KEY": secret})
     logger = configure_logging(settings.logging.level)
@@ -196,3 +194,89 @@ def test_run_failure_never_fakes_running_and_keeps_classification():
     rendered = " ".join(record.getMessage() for record in records)
     assert "[execution]" in rendered
     assert secret not in rendered
+
+
+class FlakyRuntime(Runtime):
+    """Runtime double failing on demand — lives in tests, never in src."""
+
+    def __init__(self, *, fail_on: str = "") -> None:
+        super().__init__()
+        self._fail_on = fail_on
+
+    def start(self) -> None:
+        if self._fail_on == "start":
+            raise OperationTimeoutError("start timed out")
+        super().start()
+
+    def stop(self) -> None:
+        if self._fail_on == "stop":
+            raise ExecutionError("stop exploded")
+        super().stop()
+
+
+def _app_with_runtime(settings: ChaosSettings, runtime: Runtime):
+    logger = configure_logging(settings.logging.level)
+    app = Application(ApplicationContext(settings=settings, runtime=runtime, logger=logger))
+    records: list[logging.LogRecord] = []
+
+    class _Collector(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    collector = _Collector()
+    logger.addHandler(collector)
+    return app, records, lambda: logger.handlers.remove(collector)
+
+
+def _events(records: list[logging.LogRecord]):
+    return [record.args for record in records]
+
+
+def test_run_start_failure_never_fakes_running():
+    app, records, detach = _app_with_runtime(
+        ChaosSettings.defaults(), FlakyRuntime(fail_on="start")
+    )
+    try:
+        with pytest.raises(OperationTimeoutError, match="start timed out"):
+            app.run()
+    finally:
+        detach()
+    assert app.context.runtime.state is RuntimeState.INITIALIZED
+    events = _events(records)
+    failed = [fields for fields in events if fields["event"] == "application.start.failed"]
+    assert len(failed) == 1
+    assert "[timeout]" in failed[0]["payload"]["error"]
+    assert failed[0]["correlation_id"]
+
+
+def test_run_stop_failure_stays_running_and_logs_event():
+    app, records, detach = _app_with_runtime(ChaosSettings.defaults(), FlakyRuntime(fail_on="stop"))
+    try:
+        with pytest.raises(ExecutionError, match="stop exploded"):
+            app.run()
+    finally:
+        detach()
+    assert app.context.runtime.state is RuntimeState.RUNNING
+    events = _events(records)
+    failed = [fields for fields in events if fields["event"] == "application.stop.failed"]
+    assert len(failed) == 1
+    assert "[execution]" in failed[0]["payload"]["error"]
+    assert failed[0]["correlation_id"]
+
+
+def test_lifecycle_events_carry_correlation_and_redacted_payload():
+    secret = "s3cr3t-lifecycle-value"
+    settings = ChaosSettings.from_env({"CHAOS_AI_API_KEY": secret})
+    app, records, detach = _app_with_runtime(settings, Runtime())
+    try:
+        assert app.run() == 0
+    finally:
+        detach()
+    events = _events(records)
+    by_name = {fields["event"]: fields for fields in events}
+    assert set(by_name) >= {"application.started", "application.stopped"}
+    correlation_ids = {fields["correlation_id"] for fields in events}
+    assert len(correlation_ids) == 1 and next(iter(correlation_ids))
+    started = by_name["application.started"]
+    assert started["payload"]["ai_api_key_present"] is True
+    assert secret not in repr(events)

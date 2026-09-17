@@ -13,7 +13,8 @@ import logging
 from dataclasses import dataclass
 
 from chaos.cau_hinh.settings import ChaosSettings
-from chaos.ha_tang.logging import configure_logging, safe_summary
+from chaos.ha_tang.context import TraceContext, use_context
+from chaos.ha_tang.logging import configure_logging, log_event, safe_summary
 from chaos.ha_tang.redaction import format_error
 from chaos.ha_tang.runtime import Runtime
 
@@ -45,23 +46,29 @@ class Application:
 
     def run(self) -> int:
         """create -> initialize -> start -> running -> stop -> shutdown
-        -> stopped. Returns the process exit code."""
+        -> stopped. Returns the process exit code.
+
+        Emits structured lifecycle events (``application.started`` /
+        ``application.stopped`` / ``application.{start,stop}.failed``)
+        under one per-run correlation context.
+        """
         logger = self._context.logger
-        logger.info("starting: %s", safe_summary(self._context.settings))
-        try:
-            self._context.runtime.initialize()
-            self._context.runtime.start()
-        except Exception as exc:
-            logger.error("startup failed: %s", format_error(exc))
-            raise
-        try:
-            self._context.runtime.stop()
-        except Exception as exc:
-            logger.error("stop failed: %s", format_error(exc))
-            raise
-        self.shutdown()
-        logger.info("stopped")
-        return 0
+        with use_context(TraceContext.new()):
+            log_event(logger, "INFO", "application.started", safe_summary(self._context.settings))
+            try:
+                self._context.runtime.initialize()
+                self._context.runtime.start()
+            except Exception as exc:
+                log_event(logger, "ERROR", "application.start.failed", {"error": format_error(exc)})
+                raise
+            try:
+                self._context.runtime.stop()
+            except Exception as exc:
+                log_event(logger, "ERROR", "application.stop.failed", {"error": format_error(exc)})
+                raise
+            self.shutdown()
+            log_event(logger, "INFO", "application.stopped")
+            return 0
 
     def shutdown(self) -> None:
         """Explicit final halt (idempotent via the runtime)."""

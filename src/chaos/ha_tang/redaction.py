@@ -18,14 +18,18 @@ _SENSITIVE_STEMS = (
     "accesstoken",
     "refreshtoken",
     "idtoken",
+    "authtoken",
     "clientsecret",
     "password",
     "passwd",
     "secret",
+    "secrets",
     "token",
+    "tokens",
     "authorization",
     "bearer",
     "credential",
+    "credentials",
     "sessionkey",
     "privatekey",
 )
@@ -38,8 +42,16 @@ _KEY_VALUE_RE = re.compile(
 
 
 def _is_sensitive_key(key: str) -> bool:
+    """Match a normalized key exactly or by suffix.
+
+    Suffix (not substring) matching redacts ``x-api-key`` and
+    ``my_token`` while sparing ``ai_api_key_present``, ``token_count``
+    and ``secretary`` — conservative about secrets, precise about
+    non-secrets. Bare ``auth`` is deliberately *not* a stem so
+    structured ``auth`` blocks recurse instead of being nuked.
+    """
     normalized = key.lower().replace("_", "").replace("-", "")
-    return any(stem in normalized for stem in _SENSITIVE_STEMS)
+    return any(normalized == stem or normalized.endswith(stem) for stem in _SENSITIVE_STEMS)
 
 
 def _is_secret_holder(value: Any) -> bool:

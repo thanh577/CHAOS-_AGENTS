@@ -24,6 +24,27 @@ def test_sensitive_keys_redacted_case_insensitively():
     assert all(value == REDACTED for key, value in data.items() if key != "public_name")
 
 
+def test_key_matching_is_precise_not_substring():
+    # Gap-audit regression: presence/counter/descriptive keys must survive;
+    # real credential keys (even prefixed) must not.
+    data = redact_mapping(
+        {
+            "ai_api_key_present": True,
+            "token_count": 5,
+            "secretary": "Ms Smith",
+            "auth": {"mode": "none"},
+            "x-api-key": "hidden",
+            "my_token": "hidden",
+        }
+    )
+    assert data["ai_api_key_present"] is True
+    assert data["token_count"] == 5
+    assert data["secretary"] == "Ms Smith"
+    assert data["auth"] == {"mode": "none"}
+    assert data["x-api-key"] == REDACTED
+    assert data["my_token"] == REDACTED
+
+
 def test_bearer_and_basic_headers_redacted():
     secret = "s3cr3t-token"
     assert redact_text(f"Authorization: Bearer {secret}") == "Authorization: Bearer ***"
