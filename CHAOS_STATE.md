@@ -6,13 +6,13 @@
 
 ## Current State
 
-- **Status:** IN_PROGRESS (Milestone 4)
-- **Current Milestone:** 4 — Permission
-- **Current Task:** T4.3 DONE — tiếp T4.4 (boundary tests còn lại cho bao_mat + Integration/DoD, chốt M4)
-- **Last Completed Task:** T4.3 — Wire PermissionEngine vào ToolRouter (10 tests, 363 pass)
+- **Status:** DONE (Milestone 4) — chờ lệnh milestone tiếp theo
+- **Current Milestone:** 4 — Permission (HOÀN THÀNH)
+- **Current Task:** T4.4 DONE — Milestone 4 (Permission) hoàn thành. Không tự sang M5.
+- **Last Completed Task:** T4.4 — Boundary & Integration/DoD, chốt Milestone 4 (4 tests, 367 pass)
 - **Blocked By:** Không
-- **Next Action:** Triển khai T4.4.
-- **Last Updated:** 2026-09-17 (T4.3 complete)
+- **Next Action:** Chờ lệnh user cho Milestone 5 (Verifier) hoặc push M4 lên GitHub qua bundle.
+- **Last Updated:** 2026-09-17 (T4.4 complete — Milestone 4 DONE)
 
 ## Milestone 4 Plan — Permission (ARCHITECTURE.md layer 6 "Permission Engine", TASKS.md #4)
 
@@ -321,6 +321,7 @@
   `tests/test_tool_router_boundaries.py` (sửa: cho phép import
   `bao_mat.contracts.permission_engine`, vẫn cấm import concrete engine). Không sửa
   `bao_mat/engine.py`/`recording.py`; `pyproject.toml`/`uv.lock` untouched.
+- T4.4: `tests/test_bao_mat_boundaries.py` (mới, 4 tests). Không sửa src nào.
 
 ## Tests
 
@@ -420,6 +421,10 @@
   T3.3 boundary (đã update) xanh lại sau khi cho phép import contract mới; `uvx ruff check .` →
   pass (1 unused import tự sửa bằng `--fix`); `uvx ruff format --check .` → 107 files pass;
   `uv run chaos` env sạch → exit 0.
+- T4.4: `uv run pytest -q` → **367 passed** (363 cũ xanh + 4 mới: imports stdlib/chaos-only cho
+  `engine.py`+`recording.py`, không cong_cu/ORM/SDK/shell literal, không secret-shaped literal,
+  `engine.py` độc lập persistence — chỉ `recording.py` được biết); `uvx ruff check .` → pass
+  ngay lần đầu; `uvx ruff format --check .` → 108 files pass; `uv run chaos` env sạch → exit 0.
 
 ## Verification
 
@@ -494,6 +499,10 @@
   engine) + 1 test mới (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan
   → 0 match; toàn bộ test T3.1/T3.2 cũ (17 test) chạy lại không sửa gì vẫn pass — xác nhận
   không phá behavior cũ khi không có engine; `.env` không tồn tại.
+- T4.4: diff review → 1 test file mới, không sửa src nào (`pyproject.toml`/`uv.lock` untouched
+  → dependency delta 0); secret scan trên `engine.py`/`recording.py`/`router.py`/toàn bộ test
+  M4 → 0 match; boundary scan (stdlib/chaos-only, không cong_cu, `engine.py` không đụng
+  persistence) → pass; `.env` không tồn tại; `./data/chaos.db` tạo bởi verify đã xóa.
 
 ## Important Technical Decisions
 
@@ -627,6 +636,15 @@
   `test_tool_router_boundaries.py` (T3.3) để cho phép đúng 1 import bao_mat hợp lệ
   (`bao_mat.contracts.permission_engine`) trong khi vẫn cấm mọi implementation cụ thể — bằng
   chứng boundary test tiến hoá cùng module nó kiểm tra, không phải hạ chuẩn.
+- T4.4: boundary test `bao_mat` KHÔNG cấm chuỗi `PermissionEngine`/`bao_mat` như boundary test
+  của M1/M2 vẫn làm — khác biệt cố tình: các module đó (`brain.py`/`event_bus.py`) đúng là
+  không được biết `bao_mat`, nhưng `engine.py`/`recording.py` CHÍNH LÀ `bao_mat` và implement
+  trực tiếp lớp `PermissionEngine`, nên cấm 2 chuỗi đó sẽ tự đánh rớt danh tính hợp lệ của chính
+  nó; thay vào đó cấm `cong_cu` (chiều phụ thuộc đúng là router → bao_mat.contract, không bao
+  giờ ngược lại). Milestone 4 (Permission) hoàn thành: `PermissionEngine` có implementation
+  thật (`StaticPermissionEngine`), có audit trail thật (`RecordingPermissionEngine` → bảng
+  `permissions`), và đã wire vào `ToolRouter` với 3 verdict đúng nghĩa, không phá bất kỳ hành vi
+  M3 nào khi không gắn engine.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -657,17 +675,24 @@
   chỉ để "dùng cho có". Khi milestone đó cần publish sự kiện thật, đây là điểm nối.
 - **M2 — chỉ hỗ trợ wildcard toàn cục `"*"`**, không có prefix wildcard kiểu `tool.*`. Thêm khi
   có consumer thật cần lọc theo namespace (không đoán trước, tránh over-engineering).
-- **M3 — `ToolRouter` chưa wire vào `ApplicationContext`**: đứng độc lập (như `EventBus` ở M2),
-  chưa có registry tool cụ thể nào (tool đầu tiên là M6 browser/M7 OS), permission vẫn là
-  placeholder bảo thủ SAFE-only (PermissionEngine thật là M4 — khi đó thay `_is_permitted` mà
-  không đổi chữ ký `dispatch()`), chưa có CONFIRM flow tương tác với user thật.
+- **M3 — `ToolRouter` chưa wire vào `ApplicationContext`**: vẫn đứng độc lập (như `EventBus` ở
+  M2) — chưa có registry tool cụ thể nào (tool đầu tiên là M6 browser/M7 OS) nên chưa có gì thật
+  để wire. Permission KHÔNG còn là placeholder nữa (M4 đã cho `PermissionEngine` thật, xem dưới)
+  nhưng vẫn chưa có CONFIRM flow tương tác với user thật (cần Desktop UI M9).
+- **M4 — `PermissionEngine` thật đã có (`StaticPermissionEngine`) nhưng vẫn content-blind**: chỉ
+  đọc `PermissionClass`, không đọc `input_summary`/`context` — policy path/URL/scope cụ thể cố
+  tình chưa làm vì chưa có tool cụ thể nào cần nó (chờ M6 browser/M7 OS). CONFIRM verdict được
+  báo cáo đúng (event `tool.execution.confirm_required` + `confirmation_prompt` trong lỗi) nhưng
+  KHÔNG có cách nào để người dùng thực sự "đồng ý" và cho chạy lại — cần cả kênh tương tác
+  (Desktop UI M9) lẫn cơ chế re-dispatch sau khi duyệt (Agent Loop M15). `RecordingPermissionEngine`
+  + `StaticPermissionEngine`/`ToolRouter` chưa wire vào `ApplicationContext` (cùng lý do M3: chưa
+  có tool registry thật để cần composition).
 - Repo public trên GitHub (`https://github.com/thanh577/CHAOS-_AGENTS`), branch `main` — đã
-  push đến hết Milestone 3 (`946b2e3`), bao gồm M2 (`0fd263b`/`fa77611`/`02cba96`) và M3
-  (`23ba3d1`/`83dbe91`/`946b2e3`). Lưu ý: cloud container bị chặn push trực tiếp lên repo này
-  (org egress-proxy policy) — quy trình chuẩn từ nay là commit ở cloud clone
-  (`/home/claude/chaos`) → git bundle → SendUserFile → device_commit_files vào máy thật của
-  user → fetch+merge --ff-only trên máy → verify test → push bằng PAT (`repo`+`workflow`
-  scope) từ máy thật.
+  push đến hết Milestone 3 (`946b2e3`). Milestone 4 (`e574476`/`ceb619c`/`b8fe652`/commit T4.4
+  cuối) đang ở cloud clone (`/home/claude/chaos`), CHƯA push — cloud container bị chặn push
+  trực tiếp lên repo này (org egress-proxy policy). Quy trình chuẩn: commit ở cloud clone → git
+  bundle → SendUserFile → device_commit_files vào máy thật của user → fetch+merge --ff-only trên
+  máy → verify test → push bằng PAT (`repo`+`workflow` scope) từ máy thật.
 - T0.2 không phát hiện mâu thuẫn spec: `CONTRACTS.md`/`ARCHITECTURE.md` đủ rõ để định nghĩa shape.
 
 ## Do Not Repeat
@@ -964,11 +989,42 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - AC T4.3: đúng scope, không phá bất kỳ test M3 nào, router chỉ biết abstraction không
     hardcode implementation.
 
+- **T4.4 — Boundary & Integration/DoD, chốt Milestone 4 (2026-09-17, sau commit b8fe652):**
+  - `tests/test_bao_mat_boundaries.py` (theo mẫu `test_event_bus_boundaries.py`): imports
+    stdlib/chaos-only cho `engine.py`+`recording.py`; không cong_cu/ORM/SDK/shell literal (CỐ
+    TÌNH không cấm `PermissionEngine`/`bao_mat` như mẫu M1/M2 — 2 module này CHÍNH LÀ bao_mat và
+    implement trực tiếp lớp đó, cấm sẽ tự đánh rớt danh tính hợp lệ); không secret-shaped
+    literal; `engine.py` (policy) độc lập persistence — chỉ `recording.py` được biết.
+  - Full verify: 367 tests pass (363 cũ xanh + 4 boundary mới); `ruff check`/`format --check`
+    pass (108 files); `uv run chaos` env sạch exit 0; secret scan trên toàn bộ file M4 → 0
+    match; `pyproject.toml`/`uv.lock` untouched suốt M4 → dependency delta 0; `./data/chaos.db`
+    verify đã xóa.
+  - AC M4 (Milestone 4 Plan): `StaticPermissionEngine` policy thật đúng 3 verdict (T4.1) ✓,
+    `RecordingPermissionEngine` ghi audit trail thật vào bảng `permissions` (T4.2) ✓, wire vào
+    `ToolRouter` với event `confirm_required` riêng biệt, không phá behavior M3 khi không có
+    engine (T4.3) ✓, boundary tests + full verify (T4.4) ✓. Không có UI/CLI cho CONFIRM thật,
+    không policy content-aware, không wire `ApplicationContext`, không Verifier thật — đúng như
+    Milestone 4 Plan đã ghi trước khi code. Milestone 4 (Permission) HOÀN THÀNH. Không tự sang
+    M5 — chờ lệnh user.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T4.4 (chốt M4)
+- Session: Milestone 4 — T4.4 Boundary & Integration/DoD
+- Completed: T4.4 (`test_bao_mat_boundaries.py`: stdlib/chaos-only, không cong_cu/ORM/SDK/shell,
+  không secret literal, engine.py độc lập persistence; 4 tests, 367 pass, ruff/format pass,
+  chaos exit 0, dep delta 0). Milestone 4 (Permission) DONE.
+- Changed: 1 test file mới (xem Changed Files); không sửa src nào ở T4.4
+- Tests: pytest 367 passed (363 cũ xanh + 4 mới); pass ngay lần đầu
+- Decisions: không cấm `PermissionEngine`/`bao_mat` trong boundary test này (khác mẫu M1/M2) vì
+  2 module này chính là bao_mat; cấm `cong_cu` để giữ đúng chiều phụ thuộc
+- Blockers: không — DoD Milestone 4 có evidence đầy đủ
+- Next: chờ lệnh milestone tiếp theo (M5 Verifier theo TASKS.md); KHÔNG tự sang M5. Cần push 4
+  commit M4 (T4.1/T4.2/T4.3/T4.4) lên GitHub qua bundle-transfer workflow khi có lệnh + PAT.
 
 ## 2026-09-17 T4.3
 - Session: Milestone 4 — T4.3 Wire PermissionEngine vào ToolRouter
