@@ -6,13 +6,76 @@
 
 ## Current State
 
-- **Status:** DONE (Milestone 3) — chờ lệnh milestone tiếp theo
-- **Current Milestone:** 3 — Tool Framework (HOÀN THÀNH)
-- **Current Task:** T3.3 DONE — Milestone 3 (Tool Framework) hoàn thành. Không tự sang M4.
+- **Status:** IN_PROGRESS (Milestone 4) — user đã ra lệnh "tiếp tục M4"
+- **Current Milestone:** 4 — Permission
+- **Current Task:** T4.1 (PermissionEngine core: `StaticPermissionEngine`)
 - **Last Completed Task:** T3.3 — Boundary & Integration/DoD, chốt Milestone 3 (4 tests, 342 pass)
 - **Blocked By:** Không
-- **Next Action:** Chờ lệnh user cho Milestone 4 (Permission) hoặc push M3 lên GitHub qua bundle.
-- **Last Updated:** 2026-09-17 (T3.3 complete — Milestone 3 DONE)
+- **Next Action:** Triển khai T4.1.
+- **Last Updated:** 2026-09-17 (bắt đầu M4)
+
+## Milestone 4 Plan — Permission (ARCHITECTURE.md layer 6 "Permission Engine", TASKS.md #4)
+
+- **Scope:** `bao_mat/contracts/permission_engine.py` (T0.2) đã khoá shape `PermissionEngine`
+  (ABC `check(request) -> decision`), `PermissionRequest` (tool_name/permission_class/
+  input_summary/context), `PermissionDecision` (verdict ALLOW/CONFIRM/BLOCK + reason + risks +
+  confirmation_prompt, `__post_init__` ép CONFIRM phải có prompt), `PermissionVerdict`. T0.6
+  cũng đã tạo sẵn bảng `permissions` + model `Permission` (id/tool_name/verdict/reason/
+  timestamps) + `Repository[Permission]` qua `repositories(db)["permissions"]` — CRUD đầy đủ
+  (không phải append-only như `audit_events`), chờ sẵn cho milestone này. M4 xây implementation
+  thật đầu tiên cho contract đó và thay thế policy placeholder SAFE-only mà `ToolRouter` (M3)
+  đang dùng tạm.
+- **Policy (T4.1, `bao_mat/engine.py`, `StaticPermissionEngine`):** map thẳng
+  `PermissionClass` → `PermissionVerdict`, giống tinh thần "ignorant of call" của M3's
+  `_is_permitted` (không đọc `input_summary`/`context` — quyết định thuần theo class đã khai
+  báo, không thể vô tình biến thành cách bypass theo nội dung gọi):
+  - `SAFE` → `ALLOW`.
+  - `CONFIRM` → `CONFIRM` với `confirmation_prompt` cụ thể theo tên tool + `risks` không rỗng.
+  - `BLOCK` → `BLOCK` với `reason`/`risks` giải thích rõ vì sao không được chạy.
+  Không I/O, không phụ thuộc `ha_tang.persistence`/`ha_tang.event_bus` — thuần policy, test độc
+  lập 100% (giống `event_bus.py` không import persistence).
+- **Recording (T4.2, `bao_mat/recording.py`, `RecordingPermissionEngine`):** decorator bọc một
+  `PermissionEngine` khác (Decorator pattern, không sửa `StaticPermissionEngine`) — mỗi lần
+  `check()` được gọi, chạy engine trong rồi ghi 1 dòng `Permission` thật vào
+  `Repository[Permission]` (DI tường minh qua constructor, đúng kiểu `AuditEventSink` ở M2),
+  trả nguyên `PermissionDecision` không đổi. Đây là audit trail cho quyết định permission,
+  tách biệt với `audit_events` (event stream chung của M2) — hai bảng phục vụ hai mục đích khác
+  nhau, không trùng lặp. Ghi thẳng qua repository (không qua EventBus) vì đây là kết quả của một
+  lời gọi request/response trực tiếp, không phải "việc đã xảy ra" kiểu fire-and-forget — quyết
+  định phải được ghi nhận đáng tin cậy bất kể `ToolRouter` có gắn EventBus hay không. Lỗi
+  repository thật khi gọi trực tiếp thì propagate nguyên vẹn (đúng tinh thần T2.2).
+- **Wire vào ToolRouter (T4.3, sửa `cong_cu/router.py`):** thêm tham số optional
+  `permission_engine: PermissionEngine | None = None` (DI tường minh, đúng kiểu `event_bus`
+  optional ở T3.2). Khi có engine: gọi `engine.check(PermissionRequest(...))`, map verdict:
+  `ALLOW` → chạy tiếp như cũ; `CONFIRM` → publish event MỚI `tool.execution.confirm_required`
+  (khác `denied` — để phân biệt "cần người duyệt" với "bị chặn hẳn", dọn đường cho UI M9 sau
+  này) + trả `ToolResult(ok=False, error=PermissionDeniedError(...))`; `BLOCK` → publish
+  `tool.execution.denied` (giữ tên cũ) + `ToolResult(ok=False, ...)`. Engine tự raise
+  `ChaosError`/exception lạ (ví dụ recording engine gặp lỗi repository) → bắt giống
+  validate()/execute() (không crash `dispatch()`), map về `tool.execution.failed` (lỗi tầng
+  router, không phải một quyết định permission hợp lệ). Khi KHÔNG có engine (`None`, mặc định)
+  → giữ NGUYÊN 100% hành vi placeholder SAFE-only của M3 (không phá test T3.1/T3.2/T3.3 nào cả)
+  — composition (chọn engine nào) là việc của layer cao hơn (Application/agent loop, chưa tồn
+  tại), không phải việc của `ToolRouter` tự quyết theo kiểu hardcode.
+  - Cập nhật `tests/test_tool_router_boundaries.py` (của T3.3): `router.py` giờ import hợp lệ
+    `chaos.bao_mat.contracts.permission_engine` (đúng tinh thần "implementation được phép biết
+    khái niệm permission" đã ghi từ T3.1) — bỏ `bao_mat` khỏi danh sách forbidden của test đó,
+    nhưng vẫn cấm `router.py` import bất kỳ implementation cụ thể nào trong `bao_mat`
+    (`bao_mat.engine`/`bao_mat.recording`) — router chỉ được biết **contract**, không được
+    hardcode chọn engine nào (composition root quyết định, DI qua constructor).
+- **T4.1 — PermissionEngine core:** `StaticPermissionEngine`, thuần policy, test độc lập.
+- **T4.2 — Recording:** `RecordingPermissionEngine`, ghi `permissions` table thật.
+- **T4.3 — Wire vào ToolRouter:** optional param, 3 verdict map đúng, không phá test M3 cũ,
+  cập nhật boundary test T3.3 cho khớp import mới hợp lệ.
+- **T4.4 — Boundary & Integration/DoD:** boundary test cho `engine.py`/`recording.py` (stdlib/
+  chaos-only; `engine.py` không đụng persistence — giống `event_bus.py`; `recording.py` được
+  phép đụng persistence — giống `event_sinks.py`; không secret literal) + full verify + state +
+  report.
+- **Out of M4:** UI/CLI thật để người dùng bấm "đồng ý" cho CONFIRM (Desktop UI M9); cơ chế
+  re-dispatch sau khi được duyệt (Agent Loop M15); policy content-aware (đọc `input_summary` để
+  quyết định theo path/scope cụ thể — chờ tool cụ thể đầu tiên ở M6/M7); wire `ToolRouter`+
+  `PermissionEngine` vào `ApplicationContext` (chưa có tool registry thật, vẫn để dành như M2/M3
+  đã ghi); Verifier thật (M5).
 
 ## Milestone 3 Plan — Tool Framework (ARCHITECTURE.md layer 5 "Tool Router", TASKS.md #3)
 
@@ -248,6 +311,8 @@
 - T3.2: `src/chaos/cong_cu/router.py` (sửa: thêm `event_bus` param + publish 4 loại event) +
   `tests/test_tool_router_events.py` (mới, 6 tests). Không sửa `event_bus.py`/`event_sinks.py`.
 - T3.3: `tests/test_tool_router_boundaries.py` (mới, 4 tests). Không sửa src nào.
+- T4.1: `src/chaos/bao_mat/engine.py` (mới) + `tests/test_permission_engine.py` (mới, 6 tests).
+  Không sửa `contracts/permission_engine.py`/`common.py`; `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -327,6 +392,12 @@
   error message, không trip test), regex scan không match subprocess/socket/eval/exec/ORM/SDK,
   không secret-shaped literal); `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format
   --check .` → 102 files pass; `uv run chaos` env sạch → exit 0 (`./data/chaos.db` verify đã xóa).
+- T4.1: `uv run pytest -q` → **348 passed** (342 cũ xanh + 6 mới: là instance thật của
+  `PermissionEngine`, SAFE → ALLOW không prompt/risk, CONFIRM → có prompt chứa tên tool + risk
+  không rỗng, BLOCK → có reason/risk không prompt, quyết định deterministic — bỏ qua
+  `input_summary`/`context` hoàn toàn, tên tool khác nhau → prompt khác nhau); `uvx ruff
+  check .` → pass ngay lần đầu; `uvx ruff format --check .` → 104 files pass; `uv run chaos`
+  env sạch → exit 0.
 
 ## Verification
 
@@ -388,6 +459,10 @@
   → dependency delta 0); secret scan trên `router.py`/toàn bộ test M3 → 0 match; boundary scan
   (stdlib/chaos-only, không `bao_mat` thật, không bare-name `PermissionEngine`) → pass; `.env`
   không tồn tại; `./data/chaos.db` tạo bởi verify đã xóa.
+- T4.1: diff review → 1 file mới (`bao_mat/engine.py`, chỉ import contract có sẵn + `common.py`,
+  không I/O) + 1 test mới (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret
+  scan → 0 match; test riêng xác nhận quyết định không đổi dù `input_summary`/`context` khác
+  nhau (không content-aware); `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -487,6 +562,14 @@
   cầu nhắc permission trong prose) nên không copy y nguyên mẫu cũ mà tách check theo đúng lý do.
   Milestone 3 (Tool Framework) hoàn thành: ToolRouter chạy được core loop rút gọn thật, có audit
   trail thật, có boundary test xác nhận không lách qua bao_mat/PermissionEngine thật nào.
+- T4.1: `StaticPermissionEngine` cố tình "ignorant" giống `_is_permitted` cũ của M3 — chỉ đọc
+  `request.permission_class`, không đọc `input_summary`/`context` (test riêng xác nhận
+  deterministic) để không thể vô tình biến thành bypass theo nội dung gọi; policy content-aware
+  (path/URL scoping cụ thể) cố tình chưa làm vì chưa có tool cụ thể nào cần nó (M6/M7); không
+  I/O — thuần policy, giống `event_bus.py` không đụng persistence (tách biệt với recording ở
+  T4.2, giống tách `event_bus.py`/`event_sinks.py` ở M2); nhánh `BLOCK` viết tường minh (không
+  dùng `else`) để một `PermissionClass` mới trong tương lai fail loud thay vì âm thầm rơi vào
+  nhánh sai.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -782,11 +865,35 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
     flow tương tác — đúng như Milestone 3 Plan đã ghi trước khi code. Milestone 3 (Tool
     Framework) HOÀN THÀNH. Không tự sang M4 — chờ lệnh user.
 
+- **T4.1 — PermissionEngine Core (2026-09-17, user ra lệnh "tiếp tục M4", sau commit f8c6db8):**
+  - `bao_mat/engine.py`: `StaticPermissionEngine(PermissionEngine)` implementation thật đầu
+    tiên cho contract T0.2 — map thẳng `PermissionClass` → `PermissionVerdict`: `SAFE` → `ALLOW`;
+    `CONFIRM` → `CONFIRM` với `confirmation_prompt` nêu tên tool + `risks` không rỗng; `BLOCK` →
+    `BLOCK` với `reason`/`risks` giải thích. Ignorant của `input_summary`/`context` (chỉ đọc
+    `permission_class`) — cố tình, để không thể bypass theo nội dung gọi. Không I/O.
+  - 6 tests mới (tổng 348 pass): là instance thật của `PermissionEngine` (ABC), SAFE/CONFIRM/
+    BLOCK đúng shape (prompt/risk/reason), quyết định deterministic bất kể input_summary/context,
+    tên tool khác nhau → prompt khác nhau.
+  - ruff + format pass ngay lần đầu; chaos exit 0. Dependency delta 0.
+  - AC T4.1: đúng scope Milestone 4 Plan, chưa có recording (T4.2), chưa wire ToolRouter (T4.3).
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T4.1
+- Session: Milestone 4 — T4.1 PermissionEngine Core
+- Completed: T4.1 (`bao_mat/engine.py`: `StaticPermissionEngine` — SAFE→ALLOW, CONFIRM→CONFIRM
+  +prompt+risk, BLOCK→BLOCK+reason+risk, ignorant input_summary/context; 6 tests, 348 pass,
+  ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 1 file mới + 1 test mới (xem Changed Files); không sửa contract nào
+- Tests: pytest 348 passed (342 cũ xanh + 6 mới); pass ngay lần đầu
+- Decisions: policy thuần, không I/O, ignorant của call content (chống bypass), nhánh BLOCK viết
+  tường minh không dùng else (fail loud nếu có PermissionClass mới)
+- Blockers: không
+- Next: T4.2 (RecordingPermissionEngine — ghi quyết định vào bảng `permissions` thật)
 
 ## 2026-09-17 T3.3 (chốt M3)
 - Session: Milestone 3 — T3.3 Boundary tests + Integration/DoD
