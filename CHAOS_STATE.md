@@ -8,11 +8,11 @@
 
 - **Status:** IN_PROGRESS (Milestone 4)
 - **Current Milestone:** 4 — Permission
-- **Current Task:** T4.2 DONE — tiếp T4.3 (wire PermissionEngine vào ToolRouter)
-- **Last Completed Task:** T4.2 — Recording (`RecordingPermissionEngine`, 5 tests, 353 pass)
+- **Current Task:** T4.3 DONE — tiếp T4.4 (boundary tests còn lại cho bao_mat + Integration/DoD, chốt M4)
+- **Last Completed Task:** T4.3 — Wire PermissionEngine vào ToolRouter (10 tests, 363 pass)
 - **Blocked By:** Không
-- **Next Action:** Triển khai T4.3.
-- **Last Updated:** 2026-09-17 (T4.2 complete)
+- **Next Action:** Triển khai T4.4.
+- **Last Updated:** 2026-09-17 (T4.3 complete)
 
 ## Milestone 4 Plan — Permission (ARCHITECTURE.md layer 6 "Permission Engine", TASKS.md #4)
 
@@ -315,6 +315,12 @@
   Không sửa `contracts/permission_engine.py`/`common.py`; `pyproject.toml`/`uv.lock` untouched.
 - T4.2: `src/chaos/bao_mat/recording.py` (mới) + `tests/test_permission_recording.py` (mới, 5
   tests). Không sửa `engine.py`/persistence; `pyproject.toml`/`uv.lock` untouched.
+- T4.3: `src/chaos/cong_cu/router.py` (sửa: thêm `permission_engine` optional param, method
+  `_check_permission`/`_deny`, event mới `tool.execution.confirm_required`) +
+  `tests/test_tool_router_permission_engine.py` (mới, 10 tests) +
+  `tests/test_tool_router_boundaries.py` (sửa: cho phép import
+  `bao_mat.contracts.permission_engine`, vẫn cấm import concrete engine). Không sửa
+  `bao_mat/engine.py`/`recording.py`; `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -405,6 +411,15 @@
   string verdict, mỗi lần check được id riêng, gọi trực tiếp lỗi repository thật propagate);
   `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format --check .` → 106 files pass;
   `uv run chaos` env sạch → exit 0.
+- T4.3: `uv run pytest -q` → **363 passed** (353 cũ xanh + 10 mới: không có engine → fallback
+  đúng 100% behavior placeholder M3, SAFE→ALLOW chạy tool thật, CONFIRM/BLOCK bị từ chối với
+  message mang tên tool, CONFIRM publish `confirm_required` không phải `denied`, BLOCK vẫn
+  publish `denied`, SAFE vẫn publish started+finished, engine raise ChaosError → map `failed`
+  (không phải denied), engine raise exception lạ không crash dispatch, call_id giữ nguyên qua
+  mọi verdict); toàn bộ 17 test T3.1/T3.2 cũ chạy lại y nguyên không sửa gì vẫn xanh; 4 test
+  T3.3 boundary (đã update) xanh lại sau khi cho phép import contract mới; `uvx ruff check .` →
+  pass (1 unused import tự sửa bằng `--fix`); `uvx ruff format --check .` → 107 files pass;
+  `uv run chaos` env sạch → exit 0.
 
 ## Verification
 
@@ -474,6 +489,11 @@
   có sẵn từ T0.6, không sửa persistence) + 1 test mới (`pyproject.toml`/`uv.lock` untouched →
   dependency delta 0); secret scan → 0 match; test riêng xác nhận lỗi repository thật propagate
   khi gọi trực tiếp (đúng tinh thần T2.2); `.env` không tồn tại.
+- T4.3: diff review → 1 file sửa (`router.py`, thêm permission_engine optional param) + 1 file
+  test sửa (`test_tool_router_boundaries.py`, mở rộng cho import contract mới, vẫn cấm concrete
+  engine) + 1 test mới (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan
+  → 0 match; toàn bộ test T3.1/T3.2 cũ (17 test) chạy lại không sửa gì vẫn pass — xác nhận
+  không phá behavior cũ khi không có engine; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -591,6 +611,22 @@
   `.update()`/`.delete()` một permission record, giữ nó là audit trail bất biến dù repository
   không tự ép điều đó; lỗi repository thật propagate nguyên vẹn khi gọi trực tiếp (đúng tinh
   thần T2.2, cô lập lỗi là việc của bên gọi/EventBus nếu có, không phải của sink/decorator).
+- T4.3: `ToolRouter` nhận `permission_engine: PermissionEngine | None = None` — khi `None`, giữ
+  NGUYÊN VĂN behavior placeholder SAFE-only của M3 (cùng message, cùng event `denied`), không hề
+  đổi API/behavior cho caller cũ; router chỉ import contract abstract
+  (`bao_mat.contracts.permission_engine`), KHÔNG BAO GIỜ import concrete engine
+  (`bao_mat.engine`/`bao_mat.recording`) — chọn engine nào là việc của composition root (chưa
+  tồn tại, để dành ApplicationContext/agent loop tương lai), không phải của router; verdict
+  `CONFIRM` publish event tên riêng `tool.execution.confirm_required` (khác `denied`) để phân
+  biệt "cần người duyệt" với "bị chặn hẳn" — dọn đường cho Desktop UI (M9) sau này lọc theo tên
+  event mà không cần đổi lại router; router KHÔNG tự resolve CONFIRM (không có kênh tương tác)
+  — chỉ báo cáo trung thực qua `PermissionDeniedError` mang theo `reason`/`confirmation_prompt`
+  của engine; engine tự raise (`ChaosError` hay exception lạ, ví dụ `RecordingPermissionEngine`
+  gặp lỗi repository) được bắt riêng và map về `tool.execution.failed` — phân biệt rõ "engine
+  hỏng" (lỗi hạ tầng) với "engine quyết định BLOCK/CONFIRM" (quyết định hợp lệ); cập nhật
+  `test_tool_router_boundaries.py` (T3.3) để cho phép đúng 1 import bao_mat hợp lệ
+  (`bao_mat.contracts.permission_engine`) trong khi vẫn cấm mọi implementation cụ thể — bằng
+  chứng boundary test tiến hoá cùng module nó kiểm tra, không phải hạ chuẩn.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -909,11 +945,44 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - ruff + format pass ngay lần đầu; chaos exit 0. Dependency delta 0.
   - AC T4.2: đúng scope, `engine.py` không hề bị sửa — chỉ tái sử dụng qua composition.
 
+- **T4.3 — Wire PermissionEngine vào ToolRouter (2026-09-17, sau commit ceb619c):**
+  - `cong_cu/router.py`: thêm `permission_engine: PermissionEngine | None = None` (optional DI,
+    đúng kiểu `event_bus`); method `_check_permission` gọi `engine.check()`, map ALLOW → chạy
+    tiếp, CONFIRM → publish `tool.execution.confirm_required` (event mới) + từ chối, BLOCK →
+    publish `tool.execution.denied` (giữ tên cũ) + từ chối; engine tự raise → map
+    `tool.execution.failed`. Khi không có engine (`None`) → giữ nguyên văn behavior placeholder
+    SAFE-only của M3, không đổi API cho caller cũ.
+  - `tests/test_tool_router_boundaries.py` (T3.3) cập nhật: cho phép đúng 1 import bao_mat hợp
+    lệ (`bao_mat.contracts.permission_engine`), vẫn cấm mọi concrete engine
+    (`bao_mat.engine`/`bao_mat.recording`, bare name `StaticPermissionEngine`/
+    `RecordingPermissionEngine`).
+  - 10 tests mới (tổng 363 pass, cả 17 test T3.1/T3.2 cũ chạy lại không sửa vẫn xanh): fallback
+    không engine, SAFE chạy được, CONFIRM/BLOCK bị từ chối đúng message, CONFIRM/BLOCK publish
+    đúng tên event khác nhau, SAFE vẫn publish started+finished, engine raise ChaosError/
+    exception lạ không crash dispatch và map đúng `failed`, call_id giữ nguyên qua mọi verdict.
+  - ruff + format pass (1 unused import tự sửa); chaos exit 0. Dependency delta 0.
+  - AC T4.3: đúng scope, không phá bất kỳ test M3 nào, router chỉ biết abstraction không
+    hardcode implementation.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T4.3
+- Session: Milestone 4 — T4.3 Wire PermissionEngine vào ToolRouter
+- Completed: T4.3 (`router.py` thêm permission_engine optional param, map ALLOW/CONFIRM/BLOCK,
+  event mới `confirm_required`, engine raise → `failed`; cập nhật boundary test T3.3 cho import
+  contract mới; 10 tests, 363 pass, ruff/format pass, chaos exit 0, dep delta 0)
+- Changed: 1 file sửa (router) + 1 file test sửa (boundaries) + 1 test mới (xem Changed Files)
+- Tests: pytest 363 passed (353 cũ xanh + 10 mới); 17 test T3.1/T3.2 cũ không sửa vẫn xanh
+  (xác nhận backward-compatible)
+- Decisions: None-engine giữ nguyên văn behavior M3, router chỉ phụ thuộc abstraction không bao
+  giờ import concrete engine, CONFIRM có event tên riêng khác BLOCK, engine tự lỗi map "failed"
+  không phải "denied"
+- Blockers: không
+- Next: T4.4 (boundary test cho engine.py/recording.py, full verify, state, commit cuối M4)
 
 ## 2026-09-17 T4.2
 - Session: Milestone 4 — T4.2 Recording
