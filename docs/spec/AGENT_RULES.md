@@ -1,0 +1,13 @@
+# Agent Rules
+- One milestone at a time.
+- Type hints; async where appropriate.
+- No secrets in source.
+- No raw LLM→shell/filesystem execution.
+- Tool validation → permission → execution → verifier.
+- UI/core/avatar separation.
+- Database migrations for schema changes.
+- Safe logs.
+- Test every meaningful task.
+- Commit meaningful milestones.
+- Maintain `CHAOS_STATE.md` after every task/session.
+- Do not claim actions completed without evidence.

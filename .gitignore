@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# uv
+.uv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+*.egg
+*.whl
+*.tar.gz
+
+# PyInstaller
+*.spec
+*.manifest
+
+# PySide6 / Qt
+*.pyc
+qt.conf
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+
+# Type checkers / linters
+.mypy_cache/
+.ruff_cache/
+.pyright/
+
+# Node / Electron (future avatar runtime — not part of Python foundation)
+node_modules/
+dist-electron/
+out/
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*token*.json
+*secret*.json
+credentials.json
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# SQLite local data
+*.db
+*.db-journal
+*.sqlite
+*.sqlite-journal
+
+# Logs / temp
+*.log
+tmp/
+temp/
