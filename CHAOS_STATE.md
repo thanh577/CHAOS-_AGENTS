@@ -6,13 +6,13 @@
 
 ## Current State
 
-- **Status:** IN_PROGRESS (Milestone 5) — user đã ra lệnh "tiếp tục M5"
+- **Status:** IN_PROGRESS (Milestone 5)
 - **Current Milestone:** 5 — Verifier
-- **Current Task:** T5.1 (Verifier core: `ExecutionOutcomeVerifier`)
-- **Last Completed Task:** T4.4 — Boundary & Integration/DoD, chốt Milestone 4 (4 tests, 367 pass)
+- **Current Task:** T5.2 DONE — tiếp T5.3 (boundary test cho kiem_tra + Integration/DoD, chốt M5)
+- **Last Completed Task:** T5.2 — Wire Verifier vào ToolRouter (9 tests, 382 pass)
 - **Blocked By:** Không
-- **Next Action:** Triển khai T5.1.
-- **Last Updated:** 2026-09-17 (bắt đầu M5)
+- **Next Action:** Triển khai T5.3.
+- **Last Updated:** 2026-09-17 (T5.2 complete)
 
 ## Milestone 5 Plan — Verifier (ARCHITECTURE.md layer 8 "Verifier", TASKS.md #5)
 
@@ -388,6 +388,12 @@
 - T5.1: `src/chaos/kiem_tra/verifier.py` (mới) + `src/chaos/kiem_tra/__init__.py` (sửa: bỏ
   "future:" khỏi docstring) + `tests/test_verifier.py` (mới, 6 tests). Không sửa
   `contracts/verifier.py`; `pyproject.toml`/`uv.lock` untouched.
+- T5.2: `src/chaos/cong_cu/router.py` (sửa: thêm `verifier` optional constructor param +
+  `expectation` optional `dispatch()` param, method `_check_verification`/`_unverified`, 2 event
+  mới `tool.verification.failed`/`.uncertain`) + `tests/test_tool_router_verifier.py` (mới, 9
+  tests) + `tests/test_tool_router_boundaries.py` (sửa: tổng quát hoá cho phép import cả
+  `bao_mat.contracts.permission_engine` lẫn `kiem_tra.contracts.verifier`, vẫn cấm concrete
+  engine/verifier). Không sửa `kiem_tra/verifier.py`; `pyproject.toml`/`uv.lock` untouched.
 
 ## Tests
 
@@ -496,6 +502,14 @@
   xuất hiện trong reason), nhiều condition đều được nêu tên, `details` không đổi verdict, không
   bao giờ tự trả FAILED); `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format --check .` →
   110 files pass; `uv run chaos` env sạch → exit 0.
+- T5.2: `uv run pytest -q` → **382 passed** (373 cũ xanh + 9 mới: không có verifier → behavior
+  M3/M4 y nguyên, VERIFIED → trả nguyên result, UNCERTAIN/FAILED → override ok=False với event
+  tên riêng, verification ngắn mạch không publish `finished` chồng lên, verifier KHÔNG được gọi
+  khi tool tự báo `ok=False`, verifier raise ChaosError/exception lạ không crash dispatch và map
+  đúng `tool.execution.failed`, call_id giữ nguyên); toàn bộ 27 test T3.1/T3.2/T4.3 cũ chạy lại
+  không sửa gì vẫn xanh; 4 test boundary (đã tổng quát hoá) xanh lại; `uvx ruff check .` → pass;
+  `uvx ruff format --check .` → 1 file tự format lại, 111 files pass; `uv run chaos` env sạch →
+  exit 0.
 
 ## Verification
 
@@ -578,6 +592,11 @@
   không I/O) + 1 dòng docstring sửa (`kiem_tra/__init__.py`) + 1 test mới (`pyproject.toml`/
   `uv.lock` untouched → dependency delta 0); secret scan → 0 match; test riêng xác nhận không
   bao giờ tự trả FAILED và `details` không đổi verdict; `.env` không tồn tại.
+- T5.2: diff review → 1 file sửa (`router.py`, thêm verifier optional param) + 1 file test sửa
+  (`test_tool_router_boundaries.py`, tổng quát hoá cho 2 subsystem) + 1 test mới
+  (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match; toàn bộ
+  test T3.1/T3.2/T4.3 cũ (27 test) chạy lại không sửa gì vẫn pass — xác nhận không phá behavior
+  cũ khi không có verifier; `.env` không tồn tại.
 
 ## Important Technical Decisions
 
@@ -729,6 +748,22 @@
   `expectation.details` (cùng lý do "chống bypass theo nội dung" như M4); không I/O — không có
   bảng `verifications` riêng vì DATA_MODEL.md không định nghĩa, audit trail sẽ đi qua
   `EventBus`/`audit_events` có sẵn khi T5.2 wire vào `ToolRouter`, không cần sink mới.
+- T5.2: `expectation` là tham số của `dispatch()` (per-call), KHÔNG phải constructor
+  (router-wide) như `verifier` — vì mỗi `ToolCall` có thể cần postcondition khác nhau; cân nhắc
+  thêm field vào `ToolCall` (kernel T0.2, dùng chung 3 package) nhưng quyết định KHÔNG làm — sửa
+  một contract nền tảng đã khoá chỉ để phục vụ 1 optional feature là quá đắt so với thêm 1 tham
+  số optional thứ 2 (additive, không phá bất kỳ caller `dispatch(call)` một tham số nào); verifier
+  CHỈ được gọi khi `result.ok is True` — tool tự báo `ok=False` đã là tín hiệu thất bại dứt
+  khoát, verify thêm là lãng phí và có thể gây nhầm lẫn nguồn gốc lỗi (test riêng xác nhận
+  verifier raise nếu bị gọi nhầm cũng không ảnh hưởng path này vì nó không được gọi); verdict
+  `VERIFIED` im lặng (giống `ALLOW` ở M4) — không có event riêng, không đổi `result`;
+  `FAILED`/`UNCERTAIN` ngắn mạch hoàn toàn (như permission denial) — event riêng của nó là
+  event terminal, KHÔNG publish thêm `tool.execution.finished` chồng lên (tránh 2 event mâu
+  thuẫn nhau mô tả cùng 1 outcome); verifier tự raise → map `tool.execution.failed` (lỗi hạ
+  tầng, không phải verdict hợp lệ), giống cách xử lý `permission_engine` tự raise ở T4.3; tổng
+  quát hoá `test_tool_router_boundaries.py` từ chỗ chỉ biết `bao_mat` (T4.3) thành dict
+  `{subsystem: allowed_contract}` — cùng logic áp dụng cho `bao_mat` (M4) và `kiem_tra` (M5),
+  tránh lặp code khi thêm engine tiếp theo (không có gì ngăn) mà không sửa lại từ đầu.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -1104,11 +1139,51 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - AC T5.1: đúng scope Milestone 5 Plan, chưa wire ToolRouter (T5.2), chưa boundary test riêng
     (T5.3).
 
+- **T5.2 — Wire Verifier vào ToolRouter (2026-09-17, sau commit 74db85f):**
+  - `cong_cu/router.py`: thêm `verifier: Verifier | None = None` (optional DI ở constructor,
+    đúng kiểu `permission_engine`) + `expectation: VerificationExpectation | None = None` ở
+    `dispatch()` (per-call, không phải constructor — lý do trong Important Technical Decisions).
+    Method `_check_verification` chỉ chạy khi có verifier VÀ `result.ok is True`; map VERIFIED →
+    im lặng trả nguyên result, FAILED/UNCERTAIN → publish event tên riêng
+    (`tool.verification.failed`/`.uncertain`) + `VerificationError` + ngắn mạch (không publish
+    `finished` chồng lên); verifier tự raise → map `tool.execution.failed`.
+  - `tests/test_tool_router_boundaries.py` (T3.3/T4.3) tổng quát hoá: `ALLOWED_CONTRACT_IMPORTS`
+    dict bao phủ cả `bao_mat.contracts.permission_engine` lẫn `kiem_tra.contracts.verifier`, vẫn
+    cấm mọi concrete engine/verifier (`bao_mat.engine`/`recording`, `kiem_tra.verifier`, bare
+    name `ExecutionOutcomeVerifier`).
+  - 9 tests mới (tổng 382 pass, cả 27 test T3.1/T3.2/T4.3 cũ chạy lại không sửa vẫn xanh): không
+    verifier → behavior cũ y nguyên, VERIFIED → result không đổi, UNCERTAIN/FAILED → override +
+    event đúng tên, ngắn mạch không có `finished` chồng, verifier KHÔNG được gọi khi tool tự báo
+    thất bại, verifier raise ChaosError/exception lạ không crash dispatch, call_id giữ nguyên.
+  - ruff + format pass (1 file tự format lại); chaos exit 0. Dependency delta 0.
+  - AC T5.2: đúng scope, không phá bất kỳ test M3/M4 nào, router chỉ biết abstraction không
+    hardcode implementation, verifier không được gọi ngoài trường hợp cần thiết.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T5.2
+- Session: Milestone 5 — T5.2 Wire Verifier vào ToolRouter
+- Completed: T5.2 (`router.py` thêm `verifier` optional param + `expectation` optional param trên
+  `dispatch()`, map VERIFIED/FAILED/UNCERTAIN, event mới `tool.verification.failed`/`.uncertain`,
+  verifier chỉ chạy khi `result.ok is True`; tổng quát hoá boundary test T3.3/T4.3 thành
+  `ALLOWED_CONTRACT_IMPORTS` dict cho cả bao_mat lẫn kiem_tra; 9 tests mới, 382 pass, ruff/format
+  pass, chaos exit 0, dep delta 0)
+- Changed: 1 file sửa (router) + 1 file test sửa (boundaries, tổng quát hoá) + 1 test mới (xem
+  Changed Files)
+- Tests: pytest 382 passed (373 cũ xanh + 9 mới); 27 test T3.x/T4.3 cũ không sửa vẫn xanh (xác
+  nhận backward-compatible với M3/M4)
+- Decisions: `expectation` là tham số của `dispatch()` không phải constructor/`ToolCall` (dữ liệu
+  theo từng call, không phải hằng số router hay field kernel bị khoá); verifier bỏ qua khi tool tự
+  báo `ok=False` (đã là tín hiệu chắc chắn); UNCERTAIN/FAILED đều short-circuit `dispatch()` như
+  permission denial (event riêng là event cuối, không phát thêm `tool.execution.finished`);
+  UNCERTAIN báo trung thực thành `ok=False` với event tên riêng khác FAILED, không tự chế cơ chế
+  retry (thuộc Agent Loop M15)
+- Blockers: không
+- Next: T5.3 (boundary test cho `kiem_tra/verifier.py`, full verify, state, commit cuối M5)
 
 ## 2026-09-17 T5.1
 - Session: Milestone 5 — T5.1 Verifier Core
