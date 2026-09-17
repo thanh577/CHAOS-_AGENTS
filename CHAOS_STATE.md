@@ -6,13 +6,13 @@
 
 ## Current State
 
-- **Status:** IN_PROGRESS (Milestone 3)
-- **Current Milestone:** 3 — Tool Framework
-- **Current Task:** T3.2 DONE — tiếp T3.3 (boundary tests + Integration/DoD, chốt M3)
-- **Last Completed Task:** T3.2 — Audit events cho Tool Execution (6 tests, 338 pass)
+- **Status:** DONE (Milestone 3) — chờ lệnh milestone tiếp theo
+- **Current Milestone:** 3 — Tool Framework (HOÀN THÀNH)
+- **Current Task:** T3.3 DONE — Milestone 3 (Tool Framework) hoàn thành. Không tự sang M4.
+- **Last Completed Task:** T3.3 — Boundary & Integration/DoD, chốt Milestone 3 (4 tests, 342 pass)
 - **Blocked By:** Không
-- **Next Action:** Triển khai T3.3 (boundary tests + full verify + state + commit cuối M3).
-- **Last Updated:** 2026-09-17 (T3.2 complete)
+- **Next Action:** Chờ lệnh user cho Milestone 4 (Permission) hoặc push M3 lên GitHub qua bundle.
+- **Last Updated:** 2026-09-17 (T3.3 complete — Milestone 3 DONE)
 
 ## Milestone 3 Plan — Tool Framework (ARCHITECTURE.md layer 5 "Tool Router", TASKS.md #3)
 
@@ -247,6 +247,7 @@
   Không sửa `contracts/tool.py`/`common.py`/`errors.py`; `pyproject.toml`/`uv.lock` untouched.
 - T3.2: `src/chaos/cong_cu/router.py` (sửa: thêm `event_bus` param + publish 4 loại event) +
   `tests/test_tool_router_events.py` (mới, 6 tests). Không sửa `event_bus.py`/`event_sinks.py`.
+- T3.3: `tests/test_tool_router_boundaries.py` (mới, 4 tests). Không sửa src nào.
 
 ## Tests
 
@@ -321,6 +322,11 @@
   (không started), payload không bao giờ mang raw arguments/data thật, event chảy được vào
   audit trail thật qua `AuditEventSink` từ M2); `uvx ruff check .` → pass; `uvx ruff format
   --check .` → 101 files pass (2 file tự format lại).
+- T3.3: `uv run pytest -q` → **342 passed** (338 cũ xanh + 4 mới: imports stdlib/chaos-only cho
+  `router.py`, không import/tên `bao_mat`/`PermissionEngine` thật ở AST-level (chỉ prose trong
+  error message, không trip test), regex scan không match subprocess/socket/eval/exec/ORM/SDK,
+  không secret-shaped literal); `uvx ruff check .` → pass ngay lần đầu; `uvx ruff format
+  --check .` → 102 files pass; `uv run chaos` env sạch → exit 0 (`./data/chaos.db` verify đã xóa).
 
 ## Verification
 
@@ -378,6 +384,10 @@
   (`pyproject.toml`/`uv.lock` untouched → dependency delta 0); secret scan → 0 match; test
   riêng xác nhận payload event không mang `data`/`arguments` thật (chỉ tool/call_id/error đã
   redact); `.env` không tồn tại.
+- T3.3: diff review → 1 test file mới, không sửa src nào (`pyproject.toml`/`uv.lock` untouched
+  → dependency delta 0); secret scan trên `router.py`/toàn bộ test M3 → 0 match; boundary scan
+  (stdlib/chaos-only, không `bao_mat` thật, không bare-name `PermissionEngine`) → pass; `.env`
+  không tồn tại; `./data/chaos.db` tạo bởi verify đã xóa.
 
 ## Important Technical Decisions
 
@@ -468,6 +478,15 @@
   denied — những nhánh đó publish thẳng "failed"/"denied", không có "started" trước đó vì
   chưa từng thực sự chuẩn bị chạy); "finished" publish cả khi `result.ok=False` do chính tool
   tự báo lỗi nghiệp vụ (khác với "failed" — đó là lỗi ở tầng router, không execute được).
+- T3.3: boundary test tách rõ 2 kiểu check để tránh false-positive: (1) AST-based cho
+  import/tên thật (`ast.Import`/`ast.ImportFrom`/`ast.Name`) — chỉ trip nếu có `import bao_mat`
+  hay bare identifier `PermissionEngine`/`bao_mat` dùng như code; (2) regex trên raw source cho
+  các pattern khác (subprocess/socket/eval/exec/ORM/SDK) nhưng CỐ TÌNH loại `PermissionEngine`
+  khỏi list regex vì router hợp lệ nhắc tên đó trong docstring/error message dạng prose — đây
+  là khác biệt so với `test_brain_boundaries.py`/`test_event_bus_boundaries.py` (không có nhu
+  cầu nhắc permission trong prose) nên không copy y nguyên mẫu cũ mà tách check theo đúng lý do.
+  Milestone 3 (Tool Framework) hoàn thành: ToolRouter chạy được core loop rút gọn thật, có audit
+  trail thật, có boundary test xác nhận không lách qua bao_mat/PermissionEngine thật nào.
 
 - Cloud AI/API là Brain.
 - Không ESP32.
@@ -498,9 +517,15 @@
   chỉ để "dùng cho có". Khi milestone đó cần publish sự kiện thật, đây là điểm nối.
 - **M2 — chỉ hỗ trợ wildcard toàn cục `"*"`**, không có prefix wildcard kiểu `tool.*`. Thêm khi
   có consumer thật cần lọc theo namespace (không đoán trước, tránh over-engineering).
+- **M3 — `ToolRouter` chưa wire vào `ApplicationContext`**: đứng độc lập (như `EventBus` ở M2),
+  chưa có registry tool cụ thể nào (tool đầu tiên là M6 browser/M7 OS), permission vẫn là
+  placeholder bảo thủ SAFE-only (PermissionEngine thật là M4 — khi đó thay `_is_permitted` mà
+  không đổi chữ ký `dispatch()`), chưa có CONFIRM flow tương tác với user thật.
 - Repo public trên GitHub (`https://github.com/thanh577/CHAOS-_AGENTS`), branch `main` — đã push
-  đến hết M1 (`e8783c6`); nhớ push các commit M2 (`5efa2fa`, `e0ff076`, và commit T2.3 cuối) khi
-  có credential.
+  đến hết M1 (`e8783c6`); các commit M2 (`0fd263b`/`fa77611`/`02cba96`) và M3 (`23ba3d1`/
+  `83dbe91`/commit T3.3 cuối) đang ở cloud clone (`/home/claude/chaos`), CHƯA push vì cloud
+  container bị chặn push trực tiếp lên repo này (org egress-proxy policy) — cần chuyển bundle
+  sang máy thật của user rồi push từ đó bằng PAT (`repo`+`workflow` scope) khi có lệnh.
 - T0.2 không phát hiện mâu thuẫn spec: `CONTRACTS.md`/`ARCHITECTURE.md` đủ rõ để định nghĩa shape.
 
 ## Do Not Repeat
@@ -734,11 +759,51 @@ ownership docs, 226 tests pass, ruff/format pass, dep delta 0, chaos exit 0. DoD
   - ruff + format pass (2 file tự format lại vì dòng dài); chaos exit 0. Dependency delta 0.
   - AC T3.2: đúng scope, EventBus/AuditEventSink của M2 không hề bị sửa — chỉ tái sử dụng.
 
+- **T3.3 — Boundary & Integration/DoD, chốt Milestone 3 (2026-09-17, sau commit 83dbe91):**
+  - `tests/test_tool_router_boundaries.py` (theo tinh thần `test_brain_boundaries.py`/
+    `test_event_bus_boundaries.py` nhưng tách 2 kiểu check để tránh false-positive từ docstring/
+    error-message prose của chính `router.py`): (1) AST-based imports stdlib/chaos-only; (2)
+    AST-based `test_no_forbidden_subsystems_as_import_or_name` — chỉ trip trên `ast.Import`/
+    `ast.ImportFrom`/`ast.Name` thật, không phải text search, nên chuỗi "PermissionEngine" trong
+    error message không kích hoạt; (3) regex scan riêng cho các pattern khác (subprocess/socket/
+    urllib/os.system/shutil/__import__/eval/exec/ctypes/sqlalchemy/pydantic/httpx/aiohttp/
+    playwright/bao_mat) — CỐ TÌNH loại `PermissionEngine` khỏi regex list vì đó là literal hợp
+    lệ trong prose, không phải code; (4) không secret-shaped literal.
+  - Full verify: 342 tests pass (338 cũ xanh + 4 boundary mới); `ruff check`/`format --check`
+    pass (102 files); `uv run chaos` env sạch exit 0; secret scan trên toàn bộ file M3 → 0
+    match; `pyproject.toml`/`uv.lock` untouched suốt M3 → dependency delta 0; `./data/chaos.db`
+    verify đã xóa.
+  - AC M3 (Milestone 3 Plan): `ToolRouter` chạy đúng core loop rút gọn `validate → permission
+    placeholder → executor` với timeout (T3.1) ✓, audit trail thật qua `EventBus`+
+    `AuditEventSink` không sửa gì ở M2 (T3.2) ✓, boundary tests + full verify (T3.3) ✓. Không
+    wire `ApplicationContext`, không PermissionEngine thật, không tool cụ thể nào, không CONFIRM
+    flow tương tác — đúng như Milestone 3 Plan đã ghi trước khi code. Milestone 3 (Tool
+    Framework) HOÀN THÀNH. Không tự sang M4 — chờ lệnh user.
+
 ---
 
 # Session Log
 
 > Sau mỗi phiên, thêm một entry ngắn. Không paste log terminal dài.
+
+## 2026-09-17 T3.3 (chốt M3)
+- Session: Milestone 3 — T3.3 Boundary tests + Integration/DoD
+- Completed: T3.3 (`test_tool_router_boundaries.py`: stdlib/chaos-only imports, AST-based no
+  bare `bao_mat`/`PermissionEngine` name-or-import (text trong prose không trip), regex scan
+  loại trừ `PermissionEngine` cho các forbidden pattern khác, no secret-shaped literal; 4
+  tests, 342 pass, ruff/format pass, chaos exit 0, dep delta 0). Milestone 3 (Tool Framework)
+  DONE.
+- Changed: 1 test file mới (xem Changed Files); không sửa src nào ở T3.3
+- Tests: pytest 342 passed (338 cũ xanh + 4 mới); pass ngay lần đầu (chạy standalone 4 passed
+  trước, rồi full suite)
+- Decisions: tách AST-check (import/tên thật) khỏi regex-check (pattern khác) để
+  `PermissionEngine` trong error-message prose của router không bị coi là vi phạm — khác
+  `test_brain_boundaries.py`/`test_event_bus_boundaries.py` vì hai module đó không có lý do
+  nhắc permission trong prose
+- Blockers: không — DoD Milestone 3 có evidence đầy đủ
+- Next: chờ lệnh milestone tiếp theo (M4 Permission theo TASKS.md); KHÔNG tự sang M4. Cần push
+  3 commit M3 (T3.1/T3.2/T3.3) + 3 commit M2 còn thiếu lên GitHub qua bundle-transfer workflow
+  khi có lệnh + PAT mới.
 
 ## 2026-09-17 T3.2
 - Session: Milestone 3 — T3.2 Audit events cho Tool Execution
